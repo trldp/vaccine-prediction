@@ -11,11 +11,14 @@ manufacturers = [
          'second_dose_reserved': True,
          'weeks_between_doses': timedelta(weeks = 4)},
         {'manufacturer': 'Johnson&Johnson',
-         'second_dose_reserved': False},
+         'second_dose_reserved': False,
+         'weeks_between_doses': None},
         {'manufacturer': 'Pfizer/BioNTech',
-         'second_dose_reserved': False},
+         'second_dose_reserved': False,
+         'weeks_between_doses': timedelta(weeks = 5)},
         {'manufacturer': 'AstraZeneca/Oxford',
-         'second_dose_reserved': False}
+         'second_dose_reserved': False,
+         'weeks_between_doses': timedelta(weeks = 12)}
     ]
 manufacturers = pd.DataFrame.from_records(manufacturers, index='manufacturer')
 
@@ -98,7 +101,7 @@ for t in administered.columns.levels[1]:
     
 
 #Cut of some of the administrations to try out preduction
-prediction_date = (datetime.now() - timedelta(weeks = 0)).date()
+prediction_date = (administered.index.max() - timedelta(weeks = 0)).date()
 prediction_date = datetime.combine(prediction_date, time())
 administered_complete = administered.copy()
 administered = administered[administered.index < prediction_date]
@@ -136,6 +139,35 @@ for index, delivery in deliveries[(deliveries['doses_left'] > 0) | (deliveries['
     else:
         predicted_administrations[delivery['manufacturer']] = predicted_administrations_for_delivery
     predicted_administrations = predicted_administrations.fillna(0.0)
+
+predicted_first_administrations = pd.DataFrame()
+predicted_second_administrations = pd.DataFrame()
+for manufacturer, details in manufacturers.iterrows():
+    if not details['weeks_between_doses']:
+        continue
+    if manufacturer not in predicted_administrations.columns:
+        continue
+    
+    prediction_end_date = prediction_date + details['weeks_between_doses']
+    p = administered['first_dose'][manufacturer].copy()
+    p.index += details['weeks_between_doses']
+    predicted_second_administrations[manufacturer] = p[p.index > prediction_date].copy()
+    if details['second_dose_reserved']:
+        predicted_first_administrations[manufacturer] = predicted_administrations[manufacturer].copy()
+    else:
+        pa = predicted_administrations[manufacturer]
+        pa = pa[pa.index < prediction_end_date]
+        predicted_first_administrations[manufacturer] = pa - predicted_second_administrations[manufacturer]
+predicted_first_administrations = predicted_first_administrations.fillna(0.0)
+predicted_second_administrations = predicted_second_administrations.fillna(0.0)
+predicted_total_administrations = predicted_first_administrations + predicted_second_administrations
+
+#TODO: remove the values below zero in the administrations (i.e. take them from the previous ones)
+#TODO: predict more than the period between two vaccines
+#TODO: maybe put in oen DF as administrered
+administered_total = administered['first_dose'].sum(axis='columns')
+prediction = administered['first_dose'].sum() + predicted_first_administrations.cumsum()
+prediction_total = prediction.sum(axis='columns')
 
 sys.exit()
 
