@@ -9,16 +9,16 @@ import sys
 manufacturers = [
         {'manufacturer': 'Moderna',
          'second_dose_reserved': True,
-         'weeks_between_doses': timedelta(weeks = 4)},
+         'time_between_doses': timedelta(weeks = 4)},
         {'manufacturer': 'Johnson&Johnson',
          'second_dose_reserved': False,
-         'weeks_between_doses': None},
+         'time_between_doses': None},
         {'manufacturer': 'Pfizer/BioNTech',
          'second_dose_reserved': False,
-         'weeks_between_doses': timedelta(weeks = 5)},
+         'time_between_doses': timedelta(weeks = 5)},
         {'manufacturer': 'AstraZeneca/Oxford',
          'second_dose_reserved': False,
-         'weeks_between_doses': timedelta(weeks = 12)}
+         'time_between_doses': timedelta(weeks = 12)}
     ]
 manufacturers = pd.DataFrame.from_records(manufacturers, index='manufacturer')
 
@@ -26,6 +26,14 @@ def date_range(start, end, interval):
     result = []
     cur = start
     while cur < end:
+        result.append(cur)
+        cur = cur + interval
+    return result
+
+def inclusive_date_range(start, end, interval):
+    result = []
+    cur = start
+    while cur <= end:
         result.append(cur)
         cur = cur + interval
     return result
@@ -98,10 +106,9 @@ administered['date'] = administered['date'].apply(pd.Timestamp)
 administered = administered.groupby(['date', 'type']).sum().unstack().fillna(0)
 for t in administered.columns.levels[1]:
     administered[('total',t)] = administered[('first_dose',t)] + administered[('second_dose',t)]
-    
 
 #Cut of some of the administrations to try out preduction
-prediction_date = (administered.index.max() - timedelta(weeks = 0)).date()
+prediction_date = (administered.index.max() + timedelta(days=1) - timedelta(weeks = 0)).date()
 prediction_date = datetime.combine(prediction_date, time())
 administered_complete = administered.copy()
 administered = administered[administered.index < prediction_date]
@@ -119,7 +126,7 @@ delivered = deliveries.groupby(['date', 'manufacturer']).sum()['amount'].unstack
 
 index_min = min(administered.index.min(), delivered.index.min())
 index_max = max(administered.index.max(), delivered.index.max())
-index_range = date_range(index_min, index_max, timedelta(days=1))
+index_range = inclusive_date_range(index_min, index_max, timedelta(days=1))
 administered_cumsum = administered_cumsum.reindex(index_range, method = 'pad')
 delivered = delivered.reindex(index_range, method = 'pad')
 
@@ -140,26 +147,58 @@ for index, delivery in deliveries[(deliveries['doses_left'] > 0) | (deliveries['
         predicted_administrations[delivery['manufacturer']] = predicted_administrations_for_delivery
     predicted_administrations = predicted_administrations.fillna(0.0)
 
-predicted_first_administrations = pd.DataFrame()
-predicted_second_administrations = pd.DataFrame()
+first_doses_without_second_dose = (administered['first_dose'].cumsum() - administered['second_dose'].sum()).clip(lower = 0).diff()
+index_range = inclusive_date_range(first_doses_without_second_dose.index.min(), predicted_administrations.index.max(), timedelta(days = 1))
+first_doses_without_second_dose = first_doses_without_second_dose.reindex(index_range)
+first_doses_without_second_dose = first_doses_without_second_dose.fillna(0.0)
+predicted_first_administrations = pd.DataFrame(index = predicted_administrations.index, columns = predicted_administrations.columns, 
+                                               data = 0.0)
+predicted_second_administrations = pd.DataFrame(index = predicted_administrations.index, columns = predicted_administrations.columns,
+                                                data = 0.0)
 for manufacturer, details in manufacturers.iterrows():
-    if not details['weeks_between_doses']:
+    if not details['time_between_doses']:
         continue
     if manufacturer not in predicted_administrations.columns:
         continue
-    
-    prediction_end_date = prediction_date + details['weeks_between_doses']
-    p = administered['first_dose'][manufacturer].copy()
-    p.index += details['weeks_between_doses']
-    predicted_second_administrations[manufacturer] = p[p.index > prediction_date].copy()
     if details['second_dose_reserved']:
         predicted_first_administrations[manufacturer] = predicted_administrations[manufacturer].copy()
+        first_doses_without_second_dose.loc[predicted_first_administrations.index, manufacturer] += predicted_first_administrations[manufacturer]
+        second_doses = first_doses_without_second_dose[manufacturer].copy()
+        second_doses.index += details['time_between_doses']
+        predicted_second_administrations[manufacturer] += second_doses[second_doses.index >= prediction_date]
+        predicted_second_administrations.loc[prediction_date, manufacturer] += second_doses[second_doses.index < prediction_date].sum()
+        first_doses_without_second_dose[manufacturer] = 0.0
     else:
-        pa = predicted_administrations[manufacturer]
-        pa = pa[pa.index < prediction_end_date]
-        predicted_first_administrations[manufacturer] = pa - predicted_second_administrations[manufacturer]
-predicted_first_administrations = predicted_first_administrations.fillna(0.0)
-predicted_second_administrations = predicted_second_administrations.fillna(0.0)
+        for date in predicted_administrations.index:
+            first_dose_date = date - details['time_between_doses']
+            second_doses = first_doses_without_second_dose.loc[first_doses_without_second_dose.index <= first_dose_date, manufacturer].sum()
+            predicted_second_administrations.loc[date, manufacturer] += second_doses
+            first_doses_without_second_dose.loc[first_doses_without_second_dose.index <= first_dose_date, manufacturer] = 0.0
+            
+            doses_left = predicted_administrations.loc[date, manufacturer] - predicted_second_administrations.loc[date, manufacturer]
+            predicted_first_administrations.loc[date, manufacturer] += doses_left
+            first_doses_without_second_dose.loc[date, manufacturer] += doses_left
+            
+            #If the predicted second doses are higher than the predicted doses, we have to borrow the predicted first doses from earlier days
+            earlier_date = date - timedelta(days = 1)
+            while earlier_date > max(first_dose_date, administered.index.max()) and predicted_first_administrations.loc[date, manufacturer] < 0:
+                borrowed_doses = min(predicted_first_administrations.loc[earlier_date, manufacturer], 
+                                     -predicted_first_administrations.loc[date, manufacturer])
+                predicted_first_administrations.loc[earlier_date, manufacturer] -= borrowed_doses
+                first_doses_without_second_dose.loc[earlier_date, manufacturer] -= borrowed_doses
+                predicted_first_administrations.loc[date, manufacturer] += borrowed_doses
+                first_doses_without_second_dose.loc[date, manufacturer] += borrowed_doses
+                
+                earlier_date -= timedelta(days = 1)
+            
+            #If we can not borrow first doses from earlier days, subtract them from the second doses and 
+            #keep them in first_doses_without_second_dose
+            if predicted_first_administrations.loc[date, manufacturer] < 0:
+                predicted_second_administrations.loc[date, manufacturer] -= -predicted_first_administrations.loc[date, manufacturer]
+                first_doses_without_second_dose.loc[first_dose_date, manufacturer] += -predicted_first_administrations.loc[date, manufacturer]
+                predicted_first_administrations.loc[date, manufacturer] = 0.0
+                first_doses_without_second_dose.loc[date, manufacturer] = 0.0
+
 predicted_total_administrations = predicted_first_administrations + predicted_second_administrations
 
 #TODO: remove the values below zero in the administrations (i.e. take them from the previous ones)
