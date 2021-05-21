@@ -1,5 +1,4 @@
 date,amount,manufacturer
-2021-05-10,361530,Pfizer/BioNTech
 2021-05-17,363870,Pfizer/BioNTech
 2021-05-24,363870,Pfizer/BioNTech
 2021-05-31,733590,Pfizer/BioNTech
@@ -7,8 +6,6 @@ date,amount,manufacturer
 2021-06-14,733590,Pfizer/BioNTech
 2021-06-21,733590,Pfizer/BioNTech
 2021-06-28,733590,Pfizer/BioNTech
-2021-05-07,76800,Moderna
-2021-05-14,76800,Moderna
 2021-05-21,76800,Moderna
 2021-05-28,76800,Moderna
 2021-06-04,76800,Moderna
@@ -16,5 +13,5 @@ date,amount,manufacturer
 2021-06-18,81600,Moderna
 2021-06-25,85200,Moderna
 2021-07-02,85200,Moderna
-2021-05-16,71700,AstraZeneca/Oxford
-2021-05-28,450300,AstraZeneca/Oxford
+2021-05-23,82000,AstraZeneca/Oxford
+2021-05-30,374000,AstraZeneca/Oxford
