@@ -37,57 +37,54 @@ def inclusive_date_range(start, end, interval):
         cur = cur + interval
     return result
 
-def calculate_administrations_per_delivery(administered, deliveries):
-    """Calculate when a delivery was completely administered or if it wasn't completely administered, 
-    calculate the doses left of the delivery. Returns the deliveries with the new columns 'completely_administered' and 'doses_left'"""
+def calculate_administered_per_delivery(administered, deliveries, manufacturers):
+    """Calculate the administrations for each delivery. Also adds the columns 'completely_administered and 'doses_left' to deliveres, 
+    containing the date when the delivery was completely administered and how many doses are left of the delivery respectively"""
+    result = pd.DataFrame(index = administered.index, 
+                          columns = deliveries.index,
+                          data = 0.0)
+    
     manufacturers_with_adminstrations = administered['total'].columns
     manufacturers_no_reservation = manufacturers[~manufacturers['second_dose_reserved']].index & manufacturers_with_adminstrations
-    administrations_left = administered.cumsum()['total'][manufacturers_no_reservation].copy()
     manufacturers_with_reservation = manufacturers[manufacturers['second_dose_reserved']].index & manufacturers_with_adminstrations
-    first_administrations_left = administered.cumsum()['first_dose'][manufacturers_with_reservation]
-    for index, delivery in deliveries.iterrows():
-        if delivery['manufacturer'] not in administered['total'].columns:
+    administrations_left = administered['total'][manufacturers_no_reservation].cumsum()
+    administrations_left[manufacturers_with_reservation] = administered['first_dose'][manufacturers_with_reservation].cumsum()
+    for (manufacturer, date), delivery in deliveries.iterrows():
+        if manufacturer not in administered['total'].columns:
             continue
         
-        if delivery['manufacturer'] in manufacturers_with_reservation:
-            #For this manufacturer, the second doses are kept in stock. So only half can be given as first doses
-            administrations_for_delivery = first_administrations_left[delivery['manufacturer']]
-            first_dose_amount = delivery['amount'] / 2
-            administrations_for_delivery = administrations_for_delivery.apply(lambda x: min(x, first_dose_amount))
-            if administrations_for_delivery.max() >= first_dose_amount:
-                deliveries.loc[index, 'completely_administered'] = administrations_for_delivery[administrations_for_delivery >= first_dose_amount].index.min()
-            deliveries.loc[index, 'first_doses_left'] = first_dose_amount - administrations_for_delivery.max()
-            
-            first_administrations_left[delivery['manufacturer']] -= administrations_for_delivery
+        if manufacturer in manufacturers_with_reservation:
+            doses = delivery['amount'] / 2
         else:
-            administrations_for_delivery = administrations_left[delivery['manufacturer']]
-            administrations_for_delivery = administrations_for_delivery.apply(lambda x: min(x, delivery['amount']))
-            if administrations_for_delivery.max() >= delivery['amount']:
-                deliveries.loc[index, 'completely_administered'] = administrations_for_delivery[administrations_for_delivery >= delivery['amount']].index.min()
-            deliveries.loc[index, 'doses_left'] = delivery['amount'] - administrations_for_delivery.max()
-            
-            administrations_left[delivery['manufacturer']] -= administrations_for_delivery
+            doses = delivery['amount']
+        administrations_for_delivery = administrations_left[manufacturer].apply(lambda x: min(x, doses))
+        result[(manufacturer, date)] = administrations_for_delivery.diff().fillna(0.0)
+        
+        administrations_left[manufacturer] -= administrations_for_delivery
+    
+    deliveries.loc[manufacturers_no_reservation, 'doses_left'] = deliveries.loc[manufacturers_no_reservation, 'amount'] - result.sum()
+    deliveries.loc[manufacturers_with_reservation, 'doses_left'] = deliveries.loc[manufacturers_with_reservation, 'amount'] / 2 - result.sum()
+    deliveries['completely_administered'] = result.cumsum().idxmax().where(deliveries['doses_left'] <= 0, other = None)
+    
+    return result
 
 def get_average_pass_through_time(deliveries):
     """Calculate the average pass through time for each vaccine type"""
     pass_through_times = {}
-    for t in deliveries['manufacturer'].unique():
-        times = deliveries[deliveries['manufacturer'] == t].set_index(['date'])['pass_through_time']
+    for t in deliveries.index.get_level_values('manufacturer').unique():
+        times = deliveries.loc[t]['pass_through_time']
         interval = timedelta(days=1)
         pt = (times / interval).ewm(halflife = 2).mean() * interval
         pass_through_times[t] = pt.iloc[-1]
     return pass_through_times
 
-def get_predicted_administrations_for_delivery(delivery, pass_through_times):
+def get_predicted_administrations_for_delivery(manufacturer, date, delivery, pass_through_times):
     """Calculate the predicted administrations for the given delivery"""
-    complete_administration_date = delivery['date'] + pass_through_times[delivery['manufacturer']].round('1d')
-    prediction_start_date = max(prediction_date, delivery['date'])
+    complete_administration_date = date + pass_through_times[manufacturer].round('1d')
+    prediction_start_date = max(prediction_date, date)
     time_to_complete_delivery = complete_administration_date - prediction_start_date
     days_to_complete_delivery = time_to_complete_delivery / timedelta(days=1)
-    if manufacturers.loc[delivery['manufacturer'], 'second_dose_reserved']:
-        doses_left = delivery['first_doses_left']
-    else:
-        doses_left = delivery['doses_left']
+    doses_left = delivery['doses_left']
     predicted_administrations_for_delivery = pd.Series({ t: doses_left / days_to_complete_delivery 
                                                         for t in date_range(prediction_start_date, complete_administration_date, timedelta(days=1))})
     predicted_administrations_for_delivery = predicted_administrations_for_delivery.apply(math.floor)
@@ -147,7 +144,7 @@ predicted_deliveries['date'] = predicted_deliveries['date'].apply(pd.Timestamp)
 predicted_delivered_by_type = predicted_deliveries.groupby(['date', 'manufacturer']).sum()['amount'].unstack().fillna(0)
 deliveries = deliveries.append(predicted_deliveries)
 deliveries = deliveries.sort_values('date')
-deliveries = deliveries.reset_index(drop = True)
+deliveries = deliveries.set_index(['manufacturer', 'date'], drop = True)
 
 index_min = min(administered.index.min(), administered.index.min())
 index_max = max(administered.index.max(), administered.index.max())
@@ -165,23 +162,29 @@ for manufacturer, details in manufacturers.iterrows():
         estimation = (administered['total'][manufacturer].cumsum() / delivered_by_type[manufacturer].cumsum().reindex_like(administered, method = 'backfill'))
     estimation = estimation[estimation != np.inf]
     factor = max(estimation.max(), 1)
-    deliveries.loc[deliveries['manufacturer'] == manufacturer, 'amount'] *= factor
+    #There seems to be a bug that makes 
+    # > deliveries.loc[manufacturer, 'amount'] *= factor
+    #not work
+    for i in deliveries.index:
+        if i[0] == manufacturer:
+            deliveries.loc[i, 'amount'] *= factor
+deliveries['amount'] = deliveries['amount'].apply(math.ceil)
 
-calculate_administrations_per_delivery(administered, deliveries)
-deliveries['pass_through_time'] = (deliveries['completely_administered'] - deliveries['date'])
+administered_per_delivery = calculate_administered_per_delivery(administered, deliveries, manufacturers)
+deliveries['pass_through_time'] = (deliveries['completely_administered'] - deliveries.index.get_level_values('date'))
 pass_through_times = get_average_pass_through_time(deliveries)
 
 #Make the prediction
 predicted_total_administrations = pd.DataFrame()
-for index, delivery in deliveries[(deliveries['doses_left'] > 0) | (deliveries['first_doses_left'] > 0)].iterrows():
-    predicted_administrations_for_delivery = get_predicted_administrations_for_delivery(delivery, pass_through_times)
+for (manufacturer, date), delivery in deliveries[deliveries['doses_left'] > 0].iterrows():
+    predicted_administrations_for_delivery = get_predicted_administrations_for_delivery(manufacturer, date, delivery, pass_through_times)
     predicted_total_administrations = predicted_total_administrations.reindex(predicted_total_administrations.index.union(predicted_administrations_for_delivery.index), 
                                                                   fill_value = 0.0)
     predicted_administrations_for_delivery = predicted_administrations_for_delivery.reindex(predicted_total_administrations.index, fill_value = 0.0)
-    if delivery['manufacturer'] in predicted_total_administrations:
-        predicted_total_administrations[delivery['manufacturer']] += predicted_administrations_for_delivery
+    if manufacturer in predicted_total_administrations:
+        predicted_total_administrations[manufacturer] += predicted_administrations_for_delivery
     else:
-        predicted_total_administrations[delivery['manufacturer']] = predicted_administrations_for_delivery
+        predicted_total_administrations[manufacturer] = predicted_administrations_for_delivery
     predicted_total_administrations = predicted_total_administrations.fillna(0.0)
 predicted_total_administrations = predicted_total_administrations[predicted_total_administrations.index <= prediction_end_date]
 
