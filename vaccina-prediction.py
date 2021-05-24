@@ -1,8 +1,16 @@
 from datetime import datetime, timedelta, time
 import math
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import plotly
+import plotly.io as pio
+import plotly.graph_objects as go
+
+pio.templates.default = 'plotly_white'
+pio.renderers.default = 'browser'
+
+#The total belgian population
+population = 11492641
 
 #A few options per manufactuerer
 manufacturers = [
@@ -95,15 +103,21 @@ def get_predicted_administrations_for_delivery(manufacturer, date, delivery, pas
     
     return predicted_administrations_for_delivery
 
-def plot(administered, administered_complete, predicted_administrations):
+def plot(fig, administered, administered_complete, predicted_administrations, label):
     administered = administered.copy()
     administered = administered.cumsum()
     administered['Total'] = administered.sum(axis = 'columns')
-    colors = {}
+    colors = {col: plotly.colors.qualitative.Plotly[i] for i, col in enumerate(administered.columns)}
+    manufacturer_line = {manufacturer: f'Manufacturer: {manufacturer}' for manufacturer in manufacturers.index}
+    manufacturer_line['Total'] = 'Any manifacturer'
     for name, col in administered.items():
-        line, = plt.plot(col)
-        colors[name] = line.get_color()
-    plt.legend([*administered.columns])
+        fig.add_trace(go.Scatter(x = col.index, y = col, name = name, legendgroup = name,
+                                 line = go.scatter.Line(color = colors[name]),
+                                 mode = 'lines',
+                                 hovertemplate = '<b>Date: %{x}</b><br />' +
+                                                 label + ': %{y}<br />' + 
+                                                 manufacturer_line[name] +
+                                                 '<extra></extra>'))
     
     predicted_administrations = predicted_administrations.copy()
     predicted_administrations['Total'] = predicted_administrations.sum(axis = 'columns')
@@ -111,7 +125,13 @@ def plot(administered, administered_complete, predicted_administrations):
     predicted_administrations.sort_index(inplace = True)
     predicted_administrations = predicted_administrations.cumsum()
     for name,col in predicted_administrations.items():
-        plt.plot(col, color = colors[name], linestyle = 'dotted')
+        fig.add_trace(go.Scatter(x = col.index, y = col, name = name, legendgroup = name,
+                                 showlegend = False, mode = 'lines',
+                                 line = go.scatter.Line(color = colors[name], dash = 'dot'),
+                                 hovertemplate = '<b>Date: %{x}</b><br />' +
+                                                 label + ' (prediction): %{y}<br />' + 
+                                                 manufacturer_line[name] +
+                                                 '<extra></extra>'))
     
     if administered_complete.index.max() > administered.index.max():
         administered_complete = administered_complete.copy()
@@ -119,7 +139,13 @@ def plot(administered, administered_complete, predicted_administrations):
         administered_complete = administered_complete.cumsum()
         administered_complete = administered_complete[administered_complete.index >= administered.index.max()]
         for name,col in administered_complete.items():
-            plt.plot(col, color = colors[name], linestyle = 'dashed')
+            fig.add_trace(go.Scatter(x = col.index, y = col, name = name, legendgroup = name,
+                                     showlegend = False, mode = 'lines',
+                                     line = go.scatter.Line(color = colors[name], dash = 'dash'),
+                                     hovertemplate = '<b>Date: %{x}</b><br />' + 
+                                                     label + ': %{y}<br />' +
+                                                     manufacturer_line[name] +
+                                                     '<extra></extra>'))
 
 pd.plotting.register_matplotlib_converters()
 
@@ -239,14 +265,38 @@ for manufacturer, details in manufacturers.iterrows():
 
 predicted_administrations['total'] = predicted_administrations['first_dose'] + predicted_administrations['second_dose']
 
-figure1 = plt.figure()
-plot(administered['total'], administered_complete['total'], predicted_administrations['total'])
-plt.suptitle('Administered vaccines')
+fig = go.Figure()
+plot(fig, administered['total'], administered_complete['total'], predicted_administrations['total'], 'Administered')
+fig.update_layout(hoverlabel = {'bgcolor': 'black'},
+                  xaxis_title = "Date", yaxis_title = "Nr of administered vaccines", 
+                  legend = dict(orientation= 'h', 
+                                yanchor = 'bottom',
+                                y = 1.02,
+                                xanchor='right',
+                                x = 1))
+fig.show()
 
-figure2 = plt.figure()
-plot(administered['first_dose'], administered_complete['first_dose'], predicted_administrations['first_dose'])
-plt.suptitle('Partially vaccinated')
+#TODO: should display this with percentage signs
+fig = go.Figure()
+plot(fig, administered['first_dose'] / population * 100, administered_complete['first_dose'] / population * 100, 
+     predicted_administrations['first_dose'] / population * 100, 'Partially vaccinated')
+fig.update_layout(hoverlabel = {'bgcolor': 'black'},
+                  xaxis_title = "Date", yaxis_title = "Percentage at least partially vaccinated of complete population",
+                  legend = dict(orientation= 'h', 
+                                yanchor = 'bottom',
+                                y = 1.02,
+                                xanchor='right',
+                                x = 1))
+fig.show()
 
-figure3 = plt.figure()
-plot(administered['second_dose'], administered_complete['second_dose'], predicted_administrations['second_dose'])
-plt.suptitle('Completely vaccinated')
+fig = go.Figure()
+plot(fig, administered['second_dose'] / population * 100, administered_complete['second_dose'] / population * 100, 
+     predicted_administrations['second_dose'] / population * 100, 'Fully vaccinated')
+fig.update_layout(hoverlabel = {'bgcolor': 'black'},
+                  xaxis_title = "Date", yaxis_title = "Percentage fully vaccinated of complete population",
+                  legend = dict(orientation= 'h', 
+                                yanchor = 'bottom',
+                                y = 1.02,
+                                xanchor='right',
+                                x = 1))
+fig.show()
