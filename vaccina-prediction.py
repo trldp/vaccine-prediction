@@ -154,6 +154,19 @@ index_max = max(administered.index.max(), administered.index.max())
 index_range = inclusive_date_range(index_min, index_max, timedelta(days=1))
 administered = administered.reindex(index_range, fill_value = 0.0)
 
+#Sometimes we can get more doses out of a vial than the official number. Therefore, we artificially increase the number of delivered doses
+#based on an estimation of how often we can do it
+for manufacturer, details in manufacturers.iterrows():
+    if manufacturer not in administered['total'].columns:
+        continue
+    if details['second_dose_reserved']:
+        estimation = (administered['first_dose'][manufacturer].cumsum() / delivered_by_type[manufacturer].cumsum().reindex_like(administered, method = 'backfill')) * 2
+    else:
+        estimation = (administered['total'][manufacturer].cumsum() / delivered_by_type[manufacturer].cumsum().reindex_like(administered, method = 'backfill'))
+    estimation = estimation[estimation != np.inf]
+    factor = max(estimation.max(), 1)
+    deliveries.loc[deliveries['manufacturer'] == manufacturer, 'amount'] *= factor
+
 calculate_administrations_per_delivery(administered, deliveries)
 deliveries['pass_through_time'] = (deliveries['completely_administered'] - deliveries['date'])
 pass_through_times = get_average_pass_through_time(deliveries)
