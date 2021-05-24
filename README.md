@@ -20,8 +20,8 @@ This should open a web-browser with three plots containing the predictions.
 
 ## Data
 The following data is used to make the prediction
-* `administered-by-vaccine-type.csv` Vaccine administrations by manufacturer. Source: [Joris Vaessen's Covid vaccinations dashboard](https://covid-vaccinatie.be/api)
-* `delivered.csv` Delivered vaccines. Source: [Joris Vaessen's Covid vaccinations dashboard](https://covid-vaccinatie.be/api)
+* `administered-by-vaccine-type.csv` Vaccine administrations by manufacturer. Source: [Joris Vaesen's Covid vaccinations dashboard](https://covid-vaccinatie.be/api)
+* `delivered.csv` Delivered vaccines. Source: [Joris Vaesen's Covid vaccinations dashboard](https://covid-vaccinatie.be/api)
 * `predicted-deliveries.csv.csv` The expected deliveries in the next months. Source: https://twitter.com/jorisvaesen/status/1396072474673090565
 
 ## License
