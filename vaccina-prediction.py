@@ -3,7 +3,6 @@ import math
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import sys
 
 #A few options per manufactuerer
 manufacturers = [
@@ -99,6 +98,32 @@ def get_predicted_administrations_for_delivery(delivery, pass_through_times):
     
     return predicted_administrations_for_delivery
 
+def plot(administered, administered_complete, predicted_administrations):
+    administered = administered.copy()
+    administered = administered.cumsum()
+    administered['Total'] = administered.sum(axis = 'columns')
+    colors = {}
+    for name, col in administered.items():
+        line, = plt.plot(col)
+        colors[name] = line.get_color()
+    plt.legend([*administered.columns])
+    
+    predicted_administrations = predicted_administrations.copy()
+    predicted_administrations['Total'] = predicted_administrations.sum(axis = 'columns')
+    predicted_administrations.loc[administered.index.max()] = administered.iloc[-1]
+    predicted_administrations.sort_index(inplace = True)
+    predicted_administrations = predicted_administrations.cumsum()
+    for name,col in predicted_administrations.items():
+        plt.plot(col, color = colors[name], linestyle = 'dotted')
+    
+    if administered_complete.index.max() > administered.index.max():
+        administered_complete = administered_complete.copy()
+        administered_complete['Total'] = administered_complete.sum(axis = 'columns')
+        administered_complete = administered_complete.cumsum()
+        administered_complete = administered_complete[administered_complete.index >= administered.index.max()]
+        for name,col in administered_complete.items():
+            plt.plot(col, color = colors[name], linestyle = 'dashed')
+
 pd.plotting.register_matplotlib_converters()
 
 administered = pd.read_csv('administered-by-vaccine-type.csv')
@@ -110,6 +135,7 @@ for t in administered.columns.levels[1]:
 #Cut of some of the administrations to try out preduction
 prediction_date = (administered.index.max() + timedelta(days=1) - timedelta(weeks = 0)).date()
 prediction_date = datetime.combine(prediction_date, time())
+prediction_end_date = datetime(year = 2021, month = 7, day = 4)
 administered_complete = administered.copy()
 administered = administered[administered.index < prediction_date]
 
@@ -144,6 +170,7 @@ for index, delivery in deliveries[(deliveries['doses_left'] > 0) | (deliveries['
     else:
         predicted_total_administrations[delivery['manufacturer']] = predicted_administrations_for_delivery
     predicted_total_administrations = predicted_total_administrations.fillna(0.0)
+predicted_total_administrations = predicted_total_administrations[predicted_total_administrations.index <= prediction_end_date]
 
 first_doses_without_second_dose = (administered['first_dose'].cumsum() - administered['second_dose'].sum()).clip(lower = 0).diff()
 index_range = inclusive_date_range(first_doses_without_second_dose.index.min(), predicted_total_administrations.index.max(), timedelta(days = 1))
@@ -197,25 +224,13 @@ for manufacturer, details in manufacturers.iterrows():
 predicted_administrations['total'] = predicted_administrations['first_dose'] + predicted_administrations['second_dose']
 
 figure1 = plt.figure()
-colors = {}
-for name, col in administered['total'].cumsum().items():
-    line, = plt.plot(col)
-    colors[name] = line.get_color()
-line, = plt.plot(administered['total'].cumsum().sum(axis = 'columns'))
-colors['Total'] = line.get_color()
-plt.legend([*administered_complete['total'].columns, 'Total'])
+plot(administered['total'], administered_complete['total'], predicted_administrations['total'])
+plt.suptitle('Administered vaccines')
 
-predicted = predicted_administrations['total'].cumsum() + administered['total'].sum()
-predicted.loc[administered.index.max()] = administered['total'].sum()
-predicted.sort_index(inplace = True)
-for name,col in predicted.items():
-    plt.plot(col, color = colors[name], linestyle = 'dotted')
-plt.plot(predicted.sum(axis = 'columns'), color = colors['Total'], linestyle='dotted')
+figure2 = plt.figure()
+plot(administered['first_dose'], administered_complete['first_dose'], predicted_administrations['first_dose'])
+plt.suptitle('Partially vaccinated')
 
-if administered_complete.index.max() > prediction_date:
-    complete = administered_complete['total'].cumsum()[administered_complete.index >= prediction_date]
-    complete.loc[administered.index.max()] = administered['total'].sum()
-    complete.sort_index(inplace = True)
-    for name,col in complete.items():
-        plt.plot(col, color = colors[name], linestyle = 'dashed')
-    plt.plot(complete.sum(axis = 'columns'), color = colors['Total'], linestyle='dashed')
+figure3 = plt.figure()
+plot(administered['second_dose'], administered_complete['second_dose'], predicted_administrations['second_dose'])
+plt.suptitle('Completely vaccinated')
