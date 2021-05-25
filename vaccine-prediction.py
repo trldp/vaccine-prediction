@@ -85,9 +85,9 @@ def calculate_administered_per_delivery(administered, deliveries, manufacturers)
         result[(manufacturer, date)] = administrations_for_delivery.diff().fillna(0.0)
         
         administrations_left[manufacturer] -= administrations_for_delivery
-    
-    deliveries.loc[manufacturers_no_reservation, 'doses_left'] = deliveries.loc[manufacturers_no_reservation, 'amount'] - result.sum()
-    deliveries.loc[manufacturers_with_reservation, 'doses_left'] = deliveries.loc[manufacturers_with_reservation, 'amount'] / 2 - result.sum()
+
+    deliveries.loc[manufacturers_no_reservation, 'doses_left'] = deliveries.loc[manufacturers_no_reservation, 'amount'] - result[manufacturers_no_reservation].sum()
+    deliveries.loc[manufacturers_with_reservation, 'doses_left'] = deliveries.loc[manufacturers_with_reservation, 'amount'] / 2 - result[manufacturers_with_reservation].sum()
     deliveries['completely_administered'] = result.cumsum().idxmax().where(deliveries['doses_left'] <= 0, other = None)
     
     return result
@@ -123,7 +123,8 @@ def plot(fig, administered, administered_complete, predicted_administrations, la
     administered = administered.copy()
     administered = administered.cumsum()
     administered['Total'] = administered.sum(axis = 'columns')
-    colors = {col: plotly.colors.qualitative.Plotly[i] for i, col in enumerate(administered.columns)}
+    administered.sort_index(axis = 'columns', inplace = True)
+    colors = {col: plotly.colors.qualitative.D3[i] for i, col in enumerate(administered.columns)}
     manufacturer_line = {manufacturer: f'Manufacturer: {manufacturer}' for manufacturer in manufacturers.index}
     manufacturer_line['Total'] = 'Any manifacturer'
     for name, col in administered.items():
@@ -165,11 +166,16 @@ def plot(fig, administered, administered_complete, predicted_administrations, la
 
 pd.plotting.register_matplotlib_converters()
 
-administered = pd.read_csv('administered-by-vaccine-type.csv')
-administered['date'] = administered['date'].apply(pd.Timestamp)
-administered = administered.groupby(['date', 'type']).sum().unstack().fillna(0)
+administered = pd.read_csv('Data/COVID19BE_VACC.csv')
+administered['DATE'] = administered['DATE'].apply(pd.Timestamp)
+administered['DOSE'] = administered['DOSE'].replace({'A': 'first_dose', 'B': 'second_dose', 'C': 'first_dose'})
+administered['BRAND'] = administered['BRAND'].replace({'AstraZeneca-Oxford': 'AstraZeneca/Oxford',
+                                                       'Pfizer-BioNTech': 'Pfizer/BioNTech'})
+administered = administered.groupby(['DATE', 'BRAND', 'DOSE'])['COUNT'].sum().unstack(level = [2, 1]).fillna(0)
 for t in administered.columns.levels[1]:
-    administered[('total',t)] = administered[('first_dose',t)] + administered[('second_dose',t)]
+    administered['total',t] = administered['first_dose',t]
+    if t in administered['second_dose'].columns:
+        administered['total',t] += administered['second_dose',t]
 
 #Cut of some of the administrations to try out preduction
 prediction_date = (administered.index.max() + timedelta(days=1) - timedelta(weeks = 0)).date()
@@ -178,10 +184,10 @@ prediction_end_date = datetime(year = 2021, month = 7, day = 4)
 administered_complete = administered.copy()
 administered = administered[administered.index < prediction_date]
 
-deliveries = pd.read_csv('delivered.csv')
+deliveries = pd.read_csv('Data/delivered.csv')
 deliveries['date'] = deliveries['date'].apply(pd.Timestamp)
 delivered_by_type = deliveries.groupby(['date', 'manufacturer']).sum()['amount'].unstack().fillna(0)
-predicted_deliveries = pd.read_csv('predicted-deliveries.csv')
+predicted_deliveries = pd.read_csv('Data/predicted-deliveries.csv')
 predicted_deliveries['date'] = predicted_deliveries['date'].apply(pd.Timestamp)
 predicted_delivered_by_type = predicted_deliveries.groupby(['date', 'manufacturer']).sum()['amount'].unstack().fillna(0)
 deliveries = deliveries.append(predicted_deliveries)
@@ -236,11 +242,11 @@ first_doses_without_second_dose = first_doses_without_second_dose.reindex(index_
 first_doses_without_second_dose = first_doses_without_second_dose.fillna(0.0)
 predicted_administrations = pd.DataFrame(index = predicted_total_administrations.index, columns = administered.columns, data = 0.0)
 for manufacturer, details in manufacturers.iterrows():
-    if not details['time_between_doses']:
-        continue
     if manufacturer not in predicted_total_administrations.columns:
         continue
-    if details['second_dose_reserved']:
+    if pd.isna(details['time_between_doses']):
+        predicted_administrations['first_dose', manufacturer] = predicted_total_administrations[manufacturer].copy()
+    elif details['second_dose_reserved']:
         predicted_administrations['first_dose', manufacturer] = predicted_total_administrations[manufacturer].copy()
         first_doses_without_second_dose.loc[predicted_administrations.index, manufacturer] += predicted_administrations['first_dose', manufacturer]
         second_doses = first_doses_without_second_dose[manufacturer].copy()
@@ -279,7 +285,11 @@ for manufacturer, details in manufacturers.iterrows():
                 predicted_administrations.loc[date, ('first_dose', manufacturer)] = 0.0
                 first_doses_without_second_dose.loc[date, manufacturer] = 0.0
 
-predicted_administrations['total'] = predicted_administrations['first_dose'] + predicted_administrations['second_dose']
+manufacturers_one_dose = manufacturers[manufacturers['time_between_doses'].isna()].index
+for t in predicted_administrations['first_dose'].columns:
+    predicted_administrations['total', t] = predicted_administrations['first_dose', t]
+    if t not in manufacturers_one_dose:
+        predicted_administrations['total', t] += predicted_administrations['second_dose', t]
 
 fig = go.Figure()
 plot(fig, administered['total'], administered_complete['total'], predicted_administrations['total'], 'Administered')
@@ -305,9 +315,15 @@ fig.update_layout(hoverlabel = {'bgcolor': 'black'},
                                 x = 1))
 fig.show()
 
+administered_completely_vaccinated = administered['second_dose'].copy()
+administered_completely_vaccinated[manufacturers_one_dose] = administered['first_dose'][manufacturers_one_dose]
+administered_complete_completely_vaccinated = administered_complete['second_dose'].copy()
+administered_complete_completely_vaccinated[manufacturers_one_dose] = administered_complete['first_dose'][manufacturers_one_dose]
+predicted_administrations_completely_vaccinated = predicted_administrations['second_dose'].copy()
+predicted_administrations_completely_vaccinated[manufacturers_one_dose] = predicted_administrations['first_dose'][manufacturers_one_dose]
 fig = go.Figure()
-plot(fig, administered['second_dose'] / population * 100, administered_complete['second_dose'] / population * 100, 
-     predicted_administrations['second_dose'] / population * 100, 'Fully vaccinated')
+plot(fig, administered_completely_vaccinated / population * 100, administered_complete_completely_vaccinated / population * 100, 
+     predicted_administrations_completely_vaccinated / population * 100, 'Fully vaccinated')
 fig.update_layout(hoverlabel = {'bgcolor': 'black'},
                   xaxis_title = "Date", yaxis_title = "Percentage fully vaccinated of complete population",
                   legend = dict(orientation= 'h', 
