@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 #
 # Copyright (C) 2021 Tobe Deprez
 # 
@@ -14,7 +16,8 @@
 # You should have received a copy of the GNU General Public License along
 # with this program.  If not, see <http://www.gnu.org/licenses/>. 
 
-from datetime import datetime, timedelta, time
+import argparse
+from datetime import datetime, timedelta, time, date
 import math
 import numpy as np
 import pandas as pd
@@ -73,7 +76,7 @@ def calculate_administered_per_delivery(administered, deliveries, manufacturers)
     manufacturers_with_reservation = manufacturers[manufacturers['second_dose_reserved']].index & manufacturers_with_adminstrations
     administrations_left = administered['total'][manufacturers_no_reservation].cumsum()
     administrations_left[manufacturers_with_reservation] = administered['first_dose'][manufacturers_with_reservation].cumsum()
-    for (manufacturer, date), delivery in deliveries.iterrows():
+    for (manufacturer, d), delivery in deliveries.iterrows():
         if manufacturer not in administered['total'].columns:
             continue
         
@@ -82,7 +85,7 @@ def calculate_administered_per_delivery(administered, deliveries, manufacturers)
         else:
             doses = delivery['amount']
         administrations_for_delivery = administrations_left[manufacturer].apply(lambda x: min(x, doses))
-        result[(manufacturer, date)] = administrations_for_delivery.diff().fillna(0.0)
+        result[(manufacturer, d)] = administrations_for_delivery.diff().fillna(0.0)
         
         administrations_left[manufacturer] -= administrations_for_delivery
 
@@ -102,10 +105,10 @@ def get_average_pass_through_time(deliveries):
         pass_through_times[t] = pt.iloc[-1]
     return pass_through_times
 
-def get_predicted_administrations_for_delivery(manufacturer, date, delivery, pass_through_times):
+def get_predicted_administrations_for_delivery(manufacturer, d, delivery, pass_through_times):
     """Calculate the predicted administrations for the given delivery"""
-    complete_administration_date = date + pass_through_times[manufacturer].round('1d')
-    prediction_start_date = max(prediction_date, date)
+    complete_administration_date = d + pass_through_times[manufacturer].round('1d')
+    prediction_start_date = max(prediction_date, d)
     time_to_complete_delivery = complete_administration_date - prediction_start_date
     days_to_complete_delivery = time_to_complete_delivery / timedelta(days=1)
     doses_left = delivery['doses_left']
@@ -164,7 +167,29 @@ def plot(fig, administered, administered_complete, predicted_administrations, la
                                                      manufacturer_line[name] +
                                                      '<extra></extra>'))
 
+def show_or_save_plot(fig, name, output_dir = None, suffix = None):
+    if output_dir is not None:
+        if suffix is not None:
+            output_file = f'{output_dir}/{name}-{suffix}.html'
+        else:
+            output_file = f'{output_dir}/{name}.html'
+        fig.write_html(output_file, include_plotlyjs = 'cdn')
+    else:
+        fig.show()
+    
+
 pd.plotting.register_matplotlib_converters()
+
+parser = argparse.ArgumentParser(description='Predict COVID vaccine administrations')
+parser.add_argument('-o', '--output-dir', metavar='DIR', 
+                    help='Export graphs to the following folder. If not provided, the graphs will be shown in a browser.')
+parser.add_argument('-s', '--suffix', metavar='SUFFIX', 
+                    help='Add the following suffix to the output filenames')
+parser.add_argument('-e', '--expected-deliveries', metavar='FILE',  default='Data/predicted-deliveries.csv',
+                    help='The file with the expected deliveries (default: %(default)s)')
+parser.add_argument('-p', '--prediction-date', metavar='DATE',  type=date.fromisoformat,
+                    help='The day to start the prediction from. (default: the day after the last administration.)')
+args = parser.parse_args()
 
 administered = pd.read_csv('Data/COVID19BE_VACC.csv')
 administered['DATE'] = administered['DATE'].apply(pd.Timestamp)
@@ -177,8 +202,11 @@ for t in administered.columns.levels[1]:
     if t in administered['second_dose'].columns:
         administered['total',t] += administered['second_dose',t]
 
-#Cut of some of the administrations to try out preduction
-prediction_date = (administered.index.max() + timedelta(days=1) - timedelta(weeks = 0)).date()
+#Cut of some of the administrations to try out prediction
+if args.prediction_date is None:
+    prediction_date = (administered.index.max() + timedelta(days=1)).date()
+else:
+    prediction_date = args.prediction_date
 prediction_date = datetime.combine(prediction_date, time())
 prediction_end_date = datetime(year = 2021, month = 7, day = 4)
 administered_complete = administered.copy()
@@ -187,7 +215,7 @@ administered = administered[administered.index < prediction_date]
 deliveries = pd.read_csv('Data/delivered.csv')
 deliveries['date'] = deliveries['date'].apply(pd.Timestamp)
 delivered_by_type = deliveries.groupby(['date', 'manufacturer']).sum()['amount'].unstack().fillna(0)
-predicted_deliveries = pd.read_csv('Data/predicted-deliveries.csv')
+predicted_deliveries = pd.read_csv(args.expected_deliveries)
 predicted_deliveries['date'] = predicted_deliveries['date'].apply(pd.Timestamp)
 predicted_delivered_by_type = predicted_deliveries.groupby(['date', 'manufacturer']).sum()['amount'].unstack().fillna(0)
 deliveries = deliveries.append(predicted_deliveries)
@@ -224,8 +252,8 @@ pass_through_times = get_average_pass_through_time(deliveries)
 
 #Make the prediction
 predicted_total_administrations = pd.DataFrame()
-for (manufacturer, date), delivery in deliveries[deliveries['doses_left'] > 0].iterrows():
-    predicted_administrations_for_delivery = get_predicted_administrations_for_delivery(manufacturer, date, delivery, pass_through_times)
+for (manufacturer, d), delivery in deliveries[deliveries['doses_left'] > 0].iterrows():
+    predicted_administrations_for_delivery = get_predicted_administrations_for_delivery(manufacturer, d, delivery, pass_through_times)
     predicted_total_administrations = predicted_total_administrations.reindex(predicted_total_administrations.index.union(predicted_administrations_for_delivery.index), 
                                                                   fill_value = 0.0)
     predicted_administrations_for_delivery = predicted_administrations_for_delivery.reindex(predicted_total_administrations.index, fill_value = 0.0)
@@ -255,35 +283,35 @@ for manufacturer, details in manufacturers.iterrows():
         predicted_administrations.loc[prediction_date, ('second_dose', manufacturer)] += second_doses[second_doses.index < prediction_date].sum()
         first_doses_without_second_dose[manufacturer] = 0.0
     else:
-        for date in predicted_total_administrations.index:
-            first_dose_date = date - details['time_between_doses']
+        for d in predicted_total_administrations.index:
+            first_dose_date = d - details['time_between_doses']
             second_doses = first_doses_without_second_dose.loc[first_doses_without_second_dose.index <= first_dose_date, manufacturer].sum()
-            predicted_administrations.loc[date, ('second_dose', manufacturer)] += second_doses
+            predicted_administrations.loc[d, ('second_dose', manufacturer)] += second_doses
             first_doses_without_second_dose.loc[first_doses_without_second_dose.index <= first_dose_date, manufacturer] = 0.0
             
-            doses_left = predicted_total_administrations.loc[date, manufacturer] - predicted_administrations.loc[date, ('second_dose', manufacturer)]
-            predicted_administrations.loc[date, ('first_dose', manufacturer)] += doses_left
-            first_doses_without_second_dose.loc[date, manufacturer] += doses_left
+            doses_left = predicted_total_administrations.loc[d, manufacturer] - predicted_administrations.loc[d, ('second_dose', manufacturer)]
+            predicted_administrations.loc[d, ('first_dose', manufacturer)] += doses_left
+            first_doses_without_second_dose.loc[d, manufacturer] += doses_left
             
             #If the predicted second doses are higher than the predicted doses, we have to borrow the predicted first doses from earlier days
-            earlier_date = date - timedelta(days = 1)
-            while earlier_date > max(first_dose_date, administered.index.max()) and predicted_administrations.loc[date, ('first_dose', manufacturer)] < 0:
+            earlier_date = d - timedelta(days = 1)
+            while earlier_date > max(first_dose_date, administered.index.max()) and predicted_administrations.loc[d, ('first_dose', manufacturer)] < 0:
                 borrowed_doses = min(predicted_administrations.loc[earlier_date, ('first_dose', manufacturer)], 
-                                     -predicted_administrations.loc[date, ('first_dose', manufacturer)])
+                                     -predicted_administrations.loc[d, ('first_dose', manufacturer)])
                 predicted_administrations.loc[earlier_date, ('first_dose', manufacturer)] -= borrowed_doses
                 first_doses_without_second_dose.loc[earlier_date, manufacturer] -= borrowed_doses
-                predicted_administrations.loc[date, ('first_dose', manufacturer)] += borrowed_doses
-                first_doses_without_second_dose.loc[date, manufacturer] += borrowed_doses
+                predicted_administrations.loc[d, ('first_dose', manufacturer)] += borrowed_doses
+                first_doses_without_second_dose.loc[d, manufacturer] += borrowed_doses
                 
                 earlier_date -= timedelta(days = 1)
             
             #If we can not borrow first doses from earlier days, subtract them from the second doses and 
             #keep them in first_doses_without_second_dose
-            if predicted_administrations.loc[date, ('first_dose', manufacturer)] < 0:
-                predicted_administrations.loc[date, ('second_dose', manufacturer)] -= -predicted_administrations.loc[date, ('first_dose', manufacturer)]
-                first_doses_without_second_dose.loc[first_dose_date, manufacturer] += -predicted_administrations.loc[date, ('first_dose', manufacturer)]
-                predicted_administrations.loc[date, ('first_dose', manufacturer)] = 0.0
-                first_doses_without_second_dose.loc[date, manufacturer] = 0.0
+            if predicted_administrations.loc[d, ('first_dose', manufacturer)] < 0:
+                predicted_administrations.loc[d, ('second_dose', manufacturer)] -= -predicted_administrations.loc[d, ('first_dose', manufacturer)]
+                first_doses_without_second_dose.loc[first_dose_date, manufacturer] += -predicted_administrations.loc[d, ('first_dose', manufacturer)]
+                predicted_administrations.loc[d, ('first_dose', manufacturer)] = 0.0
+                first_doses_without_second_dose.loc[d, manufacturer] = 0.0
 
 manufacturers_one_dose = manufacturers[manufacturers['time_between_doses'].isna()].index
 for t in predicted_administrations['first_dose'].columns:
@@ -300,7 +328,7 @@ fig.update_layout(hoverlabel = {'bgcolor': 'black'},
                                 y = 1.02,
                                 xanchor='right',
                                 x = 1))
-fig.show()
+show_or_save_plot(fig, 'administered', args.output_dir, args.suffix)
 
 #TODO: should display this with percentage signs
 fig = go.Figure()
@@ -313,7 +341,7 @@ fig.update_layout(hoverlabel = {'bgcolor': 'black'},
                                 y = 1.02,
                                 xanchor='right',
                                 x = 1))
-fig.show()
+show_or_save_plot(fig, 'partially', args.output_dir, args.suffix)
 
 administered_completely_vaccinated = administered['second_dose'].copy()
 administered_completely_vaccinated[manufacturers_one_dose] = administered['first_dose'][manufacturers_one_dose]
@@ -331,4 +359,4 @@ fig.update_layout(hoverlabel = {'bgcolor': 'black'},
                                 y = 1.02,
                                 xanchor='right',
                                 x = 1))
-fig.show()
+show_or_save_plot(fig, 'completely', args.output_dir, args.suffix)
