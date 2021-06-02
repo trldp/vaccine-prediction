@@ -233,9 +233,9 @@ for manufacturer, details in manufacturers.iterrows():
     if manufacturer not in administered['total'].columns:
         continue
     if details['second_dose_reserved']:
-        estimation = (administered['first_dose'][manufacturer].cumsum() / delivered_by_type[manufacturer].cumsum().reindex_like(administered, method = 'backfill')) * 2
+        estimation = (administered['first_dose'][manufacturer].cumsum() / delivered_by_type[manufacturer].cumsum().reindex_like(administered, method = 'ffill')) * 2
     else:
-        estimation = (administered['total'][manufacturer].cumsum() / delivered_by_type[manufacturer].cumsum().reindex_like(administered, method = 'backfill'))
+        estimation = (administered['total'][manufacturer].cumsum() / delivered_by_type[manufacturer].cumsum().reindex_like(administered, method = 'ffill'))
     estimation = estimation[estimation != np.inf]
     factor = max(estimation.max(), 1)
     #There seems to be a bug that makes 
