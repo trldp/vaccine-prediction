@@ -76,6 +76,8 @@ def calculate_administered_per_delivery(administered, deliveries, manufacturers)
     manufacturers_with_reservation = manufacturers[manufacturers['second_dose_reserved']].index & manufacturers_with_adminstrations
     administrations_left = administered['total'][manufacturers_no_reservation].cumsum()
     administrations_left[manufacturers_with_reservation] = administered['first_dose'][manufacturers_with_reservation].cumsum()
+    administrations_left.loc[administrations_left.index.min() - timedelta(days = 1)] = 0.0
+    administrations_left.sort_index(inplace = True)
     for (manufacturer, d), delivery in deliveries.iterrows():
         if manufacturer not in administered['total'].columns:
             continue
