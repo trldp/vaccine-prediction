@@ -112,16 +112,15 @@ def get_predicted_administrations_for_delivery(manufacturer, d, delivery, pass_t
     complete_administration_date = d + pass_through_times[manufacturer].round('1d')
     prediction_start_date = max(prediction_date, d)
     time_to_complete_delivery = complete_administration_date - prediction_start_date
-    days_to_complete_delivery = time_to_complete_delivery / timedelta(days=1)
+    days_to_complete_delivery = time_to_complete_delivery / timedelta(days=1) + 1
     doses_left = delivery['doses_left']
     predicted_administrations_for_delivery = pd.Series({ t: doses_left / days_to_complete_delivery 
-                                                        for t in date_range(prediction_start_date, complete_administration_date, timedelta(days=1))})
+                                                        for t in inclusive_date_range(prediction_start_date, complete_administration_date, timedelta(days=1))})
     predicted_administrations_for_delivery = predicted_administrations_for_delivery.apply(math.floor)
     if predicted_administrations_for_delivery.empty:
         predicted_administrations_for_delivery = pd.Series({prediction_start_date: doses_left})
     else:
         predicted_administrations_for_delivery[predicted_administrations_for_delivery.index.max() + timedelta(days=1)] = doses_left - predicted_administrations_for_delivery.sum()
-    
     return predicted_administrations_for_delivery
 
 def plot(fig, administered, administered_complete, predicted_administrations, label):
