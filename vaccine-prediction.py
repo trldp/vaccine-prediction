@@ -144,6 +144,9 @@ def predict(administered, delivered, expected_deliveries, prediction_end_date, t
     expected_deliveries = expected_deliveries * extra_doses_factor
     delivered = delivered.apply(math.ceil)
     expected_deliveries = expected_deliveries.apply(math.ceil)
+    if second_dose_reserved:
+        delivered = delivered.apply(lambda x: x + 1 if (x % 2) == 1 else x)
+        expected_deliveries = expected_deliveries.apply(lambda x: x + 1 if (x % 2) == 1 else x)
     
     #Calculate the doses left per administrations and the pass through times
     administered_per_delivery = get_administered_per_delivery(administered, delivered, second_dose_reserved)
