@@ -225,7 +225,7 @@ def predict(administered, delivered, expected_deliveries, prediction_end_date, t
                 first_doses_without_second_dose.loc[d] = 0.0
     return predicted_administrations
 
-def plot(fig, administered, administered_complete, predicted_administrations, label):
+def plot(fig, administered, administered_complete, predicted_administrations, predicted_administrations_pessimistic, label, relative = False):
     administered = administered.copy()
     administered = administered.cumsum()
     administered['Total'] = administered.sum(axis = 'columns')
@@ -234,27 +234,70 @@ def plot(fig, administered, administered_complete, predicted_administrations, la
     manufacturer_line = {manufacturer: f'Manufacturer: {manufacturer}' for manufacturer in manufacturers.index}
     manufacturer_line['Total'] = 'Any manifacturer'
     for name, col in administered.items():
-        fig.add_trace(go.Scatter(x = col.index, y = col, name = name, legendgroup = name,
-                                 line = go.scatter.Line(color = colors[name]),
-                                 mode = 'lines',
-                                 hovertemplate = '<b>Date: %{x}</b><br />' +
-                                                 label + ': %{y}<br />' + 
-                                                 manufacturer_line[name] +
-                                                 '<extra></extra>'))
+        y = col.copy()
+        if relative:
+            y /= population
+            details = '%{customdata:,} (%{y:.2%})'
+        else:
+            details = '%{y:,}'
+        fig.add_trace(go.Scatter(x = col.index, y = y, customdata = col, name = name, legendgroup = name,
+                             line = go.scatter.Line(color = colors[name]),
+                             mode = 'lines',
+                             hovertemplate = '<b>Date: %{x}</b><br />' +
+                                             label + ': ' + details + '<br />' + 
+                                             manufacturer_line[name] +
+                                             '<extra></extra>'))
     
     predicted_administrations = predicted_administrations.copy()
     predicted_administrations['Total'] = predicted_administrations.sum(axis = 'columns')
     predicted_administrations.loc[administered.index.max()] = administered.iloc[-1]
     predicted_administrations.sort_index(inplace = True)
     predicted_administrations = predicted_administrations.cumsum()
-    for name,col in predicted_administrations.items():
-        fig.add_trace(go.Scatter(x = col.index, y = col, name = name, legendgroup = name,
+    predicted_administrations_pessimistic = predicted_administrations_pessimistic.copy()
+    predicted_administrations_pessimistic['Total'] = predicted_administrations_pessimistic.sum(axis = 'columns')
+    predicted_administrations_pessimistic.loc[administered.index.max()] = administered.iloc[-1]
+    predicted_administrations_pessimistic.sort_index(inplace = True)
+    predicted_administrations_pessimistic = predicted_administrations_pessimistic.cumsum()
+    for name in predicted_administrations.columns:
+        y_min = predicted_administrations_pessimistic[name].copy()
+        y_max = predicted_administrations[name].copy()
+        diff = (y_min != y_max).any()
+        if relative:
+            y_min /= population
+            y_max /= population
+            if diff:
+                custom_data = list(zip(predicted_administrations_pessimistic[name], predicted_administrations[name],
+                                       y_min, y_max))
+                details = 'between %{customdata[0]:,} (%{customdata[2]:.2%}) and %{customdata[1]:,} (%{customdata[3]:.2%})'
+            else:
+                custom_data = list(zip(predicted_administrations[name], y_max))
+                details = '%{customdata[0]:,} (%{customdata[1]:.2%})'
+        else:
+            if diff:
+                custom_data = list(zip(y_min, y_max))
+                details = 'between %{customdata[0]:,} and %{customdata[1]:,}'
+            else:
+                custom_data = None
+                details = '%{y:,}'
+        fig.add_trace(go.Scatter(x = predicted_administrations[name].index, y = y_max,
+                                 customdata = custom_data,
+                                 name = name, legendgroup = name,
                                  showlegend = False, mode = 'lines',
                                  line = go.scatter.Line(color = colors[name], dash = 'dot'),
                                  hovertemplate = '<b>Date: %{x}</b><br />' +
-                                                 label + ' (prediction): %{y}<br />' + 
+                                                 label + ' (prediction): ' + details + '<br />' + 
                                                  manufacturer_line[name] +
                                                  '<extra></extra>'))
+        if diff:
+            fig.add_trace(go.Scatter(x = predicted_administrations[name].index, y = y_min,
+                                     customdata = custom_data,
+                                     name = name, legendgroup = name,
+                                     showlegend = False, mode = 'lines', fill = 'tonexty',
+                                     line = go.scatter.Line(color = colors[name], dash = 'dot'),
+                                     hovertemplate = '<b>Date: %{x}</b><br />' +
+                                                     label + ' (prediction): ' + details + '<br />' + 
+                                                     manufacturer_line[name] +
+                                                     '<extra></extra>'))
     
     if administered_complete.index.max() > administered.index.max():
         administered_complete = administered_complete.copy()
@@ -262,13 +305,22 @@ def plot(fig, administered, administered_complete, predicted_administrations, la
         administered_complete = administered_complete.cumsum()
         administered_complete = administered_complete[administered_complete.index >= administered.index.max()]
         for name,col in administered_complete.items():
-            fig.add_trace(go.Scatter(x = col.index, y = col, name = name, legendgroup = name,
+            y = col.copy()
+            if relative:
+                y /= population
+                details = '%{customdata:,} (%{y:.2%})'
+            else:
+                details = '%{y:,}'
+            fig.add_trace(go.Scatter(x = col.index, y = y, name = name, legendgroup = name,
                                      showlegend = False, mode = 'lines',
                                      line = go.scatter.Line(color = colors[name], dash = 'dash'),
                                      hovertemplate = '<b>Date: %{x}</b><br />' + 
-                                                     label + ': %{y}<br />' +
+                                                     label + ': ' + details + '<br />' +
                                                      manufacturer_line[name] +
                                                      '<extra></extra>'))
+    
+    if relative:
+        fig.update_layout(yaxis = dict(tickformat = '.0%'))
 
 def show_or_save_plot(fig, name, output_dir = None, suffix = None):
     if output_dir is not None:
@@ -288,8 +340,6 @@ parser.add_argument('-o', '--output-dir', metavar='DIR',
                     help='Export graphs to the following folder. If not provided, the graphs will be shown in a browser.')
 parser.add_argument('-s', '--suffix', metavar='SUFFIX', 
                     help='Add the following suffix to the output filenames')
-parser.add_argument('-e', '--expected-deliveries', metavar='FILE',  default='Data/predicted-deliveries.csv',
-                    help='The file with the expected deliveries (default: %(default)s)')
 parser.add_argument('-p', '--prediction-date', metavar='DATE',  type=date.fromisoformat,
                     help='The day to start the prediction from. (default: the day after the last administration.)')
 args = parser.parse_args()
@@ -314,59 +364,73 @@ administered = administered[administered.index < prediction_date]
 deliveries = pd.read_csv('Data/delivered.csv')
 deliveries['date'] = deliveries['date'].apply(pd.Timestamp)
 deliveries = deliveries.set_index(['manufacturer', 'date'])['amount'].sort_index()
-expected_deliveries = pd.read_csv(args.expected_deliveries)
+expected_deliveries = pd.read_csv('Data/predicted-deliveries.csv')
 expected_deliveries['date'] = expected_deliveries['date'].apply(pd.Timestamp)
 expected_deliveries = expected_deliveries.set_index(['manufacturer', 'date'])['amount'].sort_index()
+expected_deliveries_pessimistic = pd.read_csv('Data/predicted-deliveries-pessimistic.csv')
+expected_deliveries_pessimistic['date'] = expected_deliveries_pessimistic['date'].apply(pd.Timestamp)
+expected_deliveries_pessimistic = expected_deliveries_pessimistic.set_index(['manufacturer', 'date'])['amount'].sort_index()
 
 predicted_administrations = pd.DataFrame(columns = administered.columns)
+predicted_administrations_pessimistic = pd.DataFrame(columns = administered.columns)
 for manufacturer, details in manufacturers.iterrows():
     predicted = predict(administered[manufacturer], deliveries.loc[manufacturer], expected_deliveries.loc[manufacturer], prediction_end_date, 
                         details['time_between_doses'], details['second_dose_reserved'])
+    predicted_pessimistic = predict(administered[manufacturer], deliveries.loc[manufacturer], expected_deliveries_pessimistic.loc[manufacturer], 
+                                    prediction_end_date, details['time_between_doses'], details['second_dose_reserved'])
     
     if isinstance(predicted, pd.Series):
         predicted_administrations[(manufacturer, 'dose')] = predicted
+        predicted_administrations_pessimistic[(manufacturer, 'dose')] = predicted_pessimistic
     else:
         for t in predicted.columns:
             predicted_administrations[(manufacturer, t)] = predicted[t]
+            predicted_administrations_pessimistic[(manufacturer, t)] = predicted_pessimistic[t]
 predicted_administrations = predicted_administrations.fillna(0.0)
+predicted_administrations_pessimistic = predicted_administrations_pessimistic.fillna(0.0)
 
 fig = go.Figure()
 plot(fig, administered.sum(axis = 'columns', level = 0), administered_complete.sum(axis = 'columns', level = 0), 
-     predicted_administrations.sum(axis = 'columns', level = 0), 'Administered')
+     predicted_administrations.sum(axis = 'columns', level = 0), predicted_administrations_pessimistic.sum(axis='columns', level=0), 
+     'Administered')
 fig.update_layout(hoverlabel = {'bgcolor': 'black'},
                   xaxis_title = "Date", yaxis_title = "Nr of administered vaccines", 
                   legend = dict(orientation= 'h', 
                                 yanchor = 'bottom',
                                 y = 1.02,
                                 xanchor='right',
-                                x = 1))
+                                x = 1),
+                  separators='. ')
 show_or_save_plot(fig, 'administered', args.output_dir, args.suffix)
 
-#TODO: should display this with percentage signs
 fig = go.Figure()
-plot(fig, administered.swaplevel(axis = 'columns')[['first_dose', 'dose']].droplevel(axis = 'columns', level = 0) / population * 100, 
-     administered_complete.swaplevel(axis = 'columns')[['first_dose', 'dose']].droplevel(axis = 'columns', level = 0) / population * 100, 
-     predicted_administrations.swaplevel(axis = 'columns')[['first_dose', 'dose']].droplevel(axis = 'columns', level = 0) / population * 100, 
-     'Partially vaccinated')
+plot(fig, administered.swaplevel(axis = 'columns')[['first_dose', 'dose']].droplevel(axis = 'columns', level = 0), 
+     administered_complete.swaplevel(axis = 'columns')[['first_dose', 'dose']].droplevel(axis = 'columns', level = 0), 
+     predicted_administrations.swaplevel(axis = 'columns')[['first_dose', 'dose']].droplevel(axis = 'columns', level = 0), 
+     predicted_administrations_pessimistic.swaplevel(axis = 'columns')[['first_dose', 'dose']].droplevel(axis = 'columns', level = 0),
+     'Partially vaccinated', relative = True)
 fig.update_layout(hoverlabel = {'bgcolor': 'black'},
                   xaxis_title = "Date", yaxis_title = "Percentage at least partially vaccinated of complete population",
                   legend = dict(orientation= 'h', 
                                 yanchor = 'bottom',
                                 y = 1.02,
                                 xanchor='right',
-                                x = 1))
+                                x = 1),
+                  separators='. ')
 show_or_save_plot(fig, 'partially', args.output_dir, args.suffix)
 
 fig = go.Figure()
-plot(fig, administered.swaplevel(axis = 'columns')[['second_dose', 'dose']].droplevel(axis = 'columns', level = 0) / population * 100, 
-     administered_complete.swaplevel(axis = 'columns')[['second_dose', 'dose']].droplevel(axis = 'columns', level = 0) / population * 100, 
-     predicted_administrations.swaplevel(axis = 'columns')[['second_dose', 'dose']].droplevel(axis = 'columns', level = 0) / population * 100, 
-     'Fully vaccinated')
+plot(fig, administered.swaplevel(axis = 'columns')[['second_dose', 'dose']].droplevel(axis = 'columns', level = 0), 
+     administered_complete.swaplevel(axis = 'columns')[['second_dose', 'dose']].droplevel(axis = 'columns', level = 0), 
+     predicted_administrations.swaplevel(axis = 'columns')[['second_dose', 'dose']].droplevel(axis = 'columns', level = 0), 
+     predicted_administrations_pessimistic.swaplevel(axis = 'columns')[['second_dose', 'dose']].droplevel(axis = 'columns', level = 0), 
+     'Fully vaccinated', relative = True)
 fig.update_layout(hoverlabel = {'bgcolor': 'black'},
                   xaxis_title = "Date", yaxis_title = "Percentage fully vaccinated of complete population",
                   legend = dict(orientation= 'h', 
                                 yanchor = 'bottom',
                                 y = 1.02,
                                 xanchor='right',
-                                x = 1))
+                                x = 1),
+                  separators='. ')
 show_or_save_plot(fig, 'completely', args.output_dir, args.suffix)
