@@ -228,14 +228,24 @@ def predict(administered, delivered, expected_deliveries, prediction_end_date, t
                 first_doses_without_second_dose.loc[d] = 0.0
     return predicted_administrations
 
-def plot(fig, administered, administered_complete, predicted_administrations, predicted_administrations_pessimistic, label, relative = False):
+def transform_by_type_to_by_result(df):
+    """Transform a DataFrame containing administrations by vaccine type (i.e. first_dose, second_dose, ...) to a DataFrame by vaccination
+    result (i.e. partially or fully)."""
+    result = df.swaplevel(axis = 'columns').rename({'first_dose': 'partially', 'second_dose': 'fully'}, axis = 'columns')
+    for manufacturer in result['dose'].columns:
+        result[('partially', manufacturer)] = result[('dose', manufacturer)]
+        result[('fully', manufacturer)] = result[('dose', manufacturer)]
+    result = result.sort_index(axis = 'columns')
+    return result.drop('dose', axis = 'columns')
+
+def plot(fig, administered, administered_complete, predicted_administrations, predicted_administrations_pessimistic, label, relative = False,
+         add_total = True, extra_hovertemplate = None):
     administered = administered.copy()
     administered = administered.cumsum()
-    administered['Total'] = administered.sum(axis = 'columns')
+    if add_total:
+        administered['Total'] = administered.sum(axis = 'columns')
     administered.sort_index(axis = 'columns', inplace = True)
     colors = {col: plotly.colors.qualitative.D3[i] for i, col in enumerate(administered.columns)}
-    manufacturer_line = {manufacturer: f'Manufacturer: {manufacturer}' for manufacturer in manufacturers.index}
-    manufacturer_line['Total'] = 'Any manifacturer'
     for name, col in administered.items():
         y = col.copy()
         if relative:
@@ -245,19 +255,21 @@ def plot(fig, administered, administered_complete, predicted_administrations, pr
             details = '%{y:,}'
         fig.add_trace(go.Scatter(x = col.index, y = y, customdata = col, name = name, legendgroup = name,
                              line = go.scatter.Line(color = colors[name]),
-                             mode = 'lines',
+                             mode = 'lines', meta = [extra_hovertemplate(name)] if extra_hovertemplate else [],
                              hovertemplate = '<b>Date: %{x}</b><br />' +
-                                             label + ': ' + details + '<br />' + 
-                                             manufacturer_line[name] +
+                                             label + ': ' + details + 
+                                             ('<br />%{meta[0]}' if extra_hovertemplate else '') + 
                                              '<extra></extra>'))
     
     predicted_administrations = predicted_administrations.copy()
-    predicted_administrations['Total'] = predicted_administrations.sum(axis = 'columns')
+    if add_total:
+        predicted_administrations['Total'] = predicted_administrations.sum(axis = 'columns')
     predicted_administrations.loc[administered.index.max()] = administered.iloc[-1]
     predicted_administrations.sort_index(inplace = True)
     predicted_administrations = predicted_administrations.cumsum()
     predicted_administrations_pessimistic = predicted_administrations_pessimistic.copy()
-    predicted_administrations_pessimistic['Total'] = predicted_administrations_pessimistic.sum(axis = 'columns')
+    if add_total:
+        predicted_administrations_pessimistic['Total'] = predicted_administrations_pessimistic.sum(axis = 'columns')
     predicted_administrations_pessimistic.loc[administered.index.max()] = administered.iloc[-1]
     predicted_administrations_pessimistic.sort_index(inplace = True)
     predicted_administrations_pessimistic = predicted_administrations_pessimistic.cumsum()
@@ -285,26 +297,27 @@ def plot(fig, administered, administered_complete, predicted_administrations, pr
         fig.add_trace(go.Scatter(x = predicted_administrations[name].index, y = y_max,
                                  customdata = custom_data,
                                  name = name, legendgroup = name,
-                                 showlegend = False, mode = 'lines',
+                                 showlegend = False, mode = 'lines', meta = [extra_hovertemplate(name)] if extra_hovertemplate else [],
                                  line = go.scatter.Line(color = colors[name], dash = 'dot'),
                                  hovertemplate = '<b>Date: %{x}</b><br />' +
-                                                 label + ' (prediction): ' + details + '<br />' + 
-                                                 manufacturer_line[name] +
+                                                 label + ' (prediction): ' + details + 
+                                                 ('<br />%{meta[0]}' if extra_hovertemplate else '') + 
                                                  '<extra></extra>'))
         if diff:
             fig.add_trace(go.Scatter(x = predicted_administrations[name].index, y = y_min,
                                      customdata = custom_data,
-                                     name = name, legendgroup = name,
+                                     name = name, legendgroup = name, meta = [extra_hovertemplate(name)] if extra_hovertemplate else [],
                                      showlegend = False, mode = 'lines', fill = 'tonexty',
                                      line = go.scatter.Line(color = colors[name], dash = 'dot'),
                                      hovertemplate = '<b>Date: %{x}</b><br />' +
-                                                     label + ' (prediction): ' + details + '<br />' + 
-                                                     manufacturer_line[name] +
+                                                     label + ' (prediction): ' + details + 
+                                                     ('<br />%{meta[0]}' if extra_hovertemplate else '') + 
                                                      '<extra></extra>'))
     
     if administered_complete.index.max() > administered.index.max():
         administered_complete = administered_complete.copy()
-        administered_complete['Total'] = administered_complete.sum(axis = 'columns')
+        if add_total:
+            administered_complete['Total'] = administered_complete.sum(axis = 'columns')
         administered_complete = administered_complete.cumsum()
         administered_complete = administered_complete[administered_complete.index >= administered.index.max()]
         for name,col in administered_complete.items():
@@ -315,13 +328,20 @@ def plot(fig, administered, administered_complete, predicted_administrations, pr
             else:
                 details = '%{y:,}'
             fig.add_trace(go.Scatter(x = col.index, y = y, name = name, legendgroup = name,
-                                     showlegend = False, mode = 'lines',
+                                     showlegend = False, mode = 'lines', meta = [extra_hovertemplate(name)] if extra_hovertemplate else [],
                                      line = go.scatter.Line(color = colors[name], dash = 'dash'),
                                      hovertemplate = '<b>Date: %{x}</b><br />' + 
-                                                     label + ': ' + details + '<br />' +
-                                                     manufacturer_line[name] +
+                                                     label + ': ' + details + 
+                                                     ('<br />%{meta[0]}' if extra_hovertemplate else '') + 
                                                      '<extra></extra>'))
     
+    fig.update_layout(hoverlabel = {'bgcolor': 'black'},
+                      legend = dict(orientation= 'h', 
+                                    yanchor = 'bottom',
+                                    y = 1.02,
+                                    xanchor='right',
+                                    x = 1),
+                      separators='. ')
     if relative:
         fig.update_layout(yaxis = dict(tickformat = '.0%'))
 
@@ -394,48 +414,40 @@ for manufacturer, details in manufacturers.iterrows():
 predicted_administrations = predicted_administrations.fillna(0.0)
 predicted_administrations_pessimistic = predicted_administrations_pessimistic.fillna(0.0)
 
+administered_by_result = transform_by_type_to_by_result(administered)
+administered_complete_by_result = transform_by_type_to_by_result(administered_complete)
+predicted_administrations_by_result = transform_by_type_to_by_result(predicted_administrations)
+predicted_administrations_pessimistic_by_result = transform_by_type_to_by_result(predicted_administrations_pessimistic)
+
+fig = go.Figure()
+mapper = {'partially': 'At least partially vaccinated', 'fully': 'Fully vaccinated'}
+plot(fig, administered_by_result.rename(mapper, axis = 'columns').sum(axis = 'columns', level=0), 
+     administered_complete_by_result.rename(mapper, axis = 'columns').sum(axis = 'columns', level=0), 
+     predicted_administrations_by_result.rename(mapper, axis = 'columns').sum(axis = 'columns', level=0), 
+     predicted_administrations_pessimistic_by_result.rename(mapper, axis = 'columns').sum(axis = 'columns', level=0), 
+     '%{fullData.name}', relative = True, add_total = False)
+fig.update_layout(xaxis_title = "Date", yaxis_title = "Percentage vaccinated")
+show_or_save_plot(fig, 'administered_by_result', args.output_dir, args.suffix)
+
 fig = go.Figure()
 plot(fig, administered.sum(axis = 'columns', level = 0), administered_complete.sum(axis = 'columns', level = 0), 
      predicted_administrations.sum(axis = 'columns', level = 0), predicted_administrations_pessimistic.sum(axis='columns', level=0), 
-     'Administered')
-fig.update_layout(hoverlabel = {'bgcolor': 'black'},
-                  xaxis_title = "Date", yaxis_title = "Nr of administered vaccines", 
-                  legend = dict(orientation= 'h', 
-                                yanchor = 'bottom',
-                                y = 1.02,
-                                xanchor='right',
-                                x = 1),
-                  separators='. ')
+     'Administered', extra_hovertemplate = lambda x: f'Manufacturer: {x}' if x != 'Total' else 'Any manufacturer')
+fig.update_layout(xaxis_title = "Date", yaxis_title = "Nr of administered vaccines")
 show_or_save_plot(fig, 'administered', args.output_dir, args.suffix)
 
 fig = go.Figure()
-plot(fig, administered.swaplevel(axis = 'columns')[['first_dose', 'dose']].droplevel(axis = 'columns', level = 0), 
-     administered_complete.swaplevel(axis = 'columns')[['first_dose', 'dose']].droplevel(axis = 'columns', level = 0), 
-     predicted_administrations.swaplevel(axis = 'columns')[['first_dose', 'dose']].droplevel(axis = 'columns', level = 0), 
-     predicted_administrations_pessimistic.swaplevel(axis = 'columns')[['first_dose', 'dose']].droplevel(axis = 'columns', level = 0),
-     'Partially vaccinated', relative = True)
-fig.update_layout(hoverlabel = {'bgcolor': 'black'},
-                  xaxis_title = "Date", yaxis_title = "Percentage at least partially vaccinated of complete population",
-                  legend = dict(orientation= 'h', 
-                                yanchor = 'bottom',
-                                y = 1.02,
-                                xanchor='right',
-                                x = 1),
-                  separators='. ')
+plot(fig, administered_by_result['partially'], administered_complete_by_result['partially'],
+     predicted_administrations_by_result['partially'], predicted_administrations_pessimistic_by_result['partially'],
+     'Partially vaccinated', relative = True, 
+     extra_hovertemplate = lambda x: f'Manufacturer: {x}' if x != 'Total' else 'Any manufacturer')
+fig.update_layout(xaxis_title = "Date", yaxis_title = "Percentage at least partially vaccinated of complete population")
 show_or_save_plot(fig, 'partially', args.output_dir, args.suffix)
 
 fig = go.Figure()
-plot(fig, administered.swaplevel(axis = 'columns')[['second_dose', 'dose']].droplevel(axis = 'columns', level = 0), 
-     administered_complete.swaplevel(axis = 'columns')[['second_dose', 'dose']].droplevel(axis = 'columns', level = 0), 
-     predicted_administrations.swaplevel(axis = 'columns')[['second_dose', 'dose']].droplevel(axis = 'columns', level = 0), 
-     predicted_administrations_pessimistic.swaplevel(axis = 'columns')[['second_dose', 'dose']].droplevel(axis = 'columns', level = 0), 
-     'Fully vaccinated', relative = True)
-fig.update_layout(hoverlabel = {'bgcolor': 'black'},
-                  xaxis_title = "Date", yaxis_title = "Percentage fully vaccinated of complete population",
-                  legend = dict(orientation= 'h', 
-                                yanchor = 'bottom',
-                                y = 1.02,
-                                xanchor='right',
-                                x = 1),
-                  separators='. ')
+plot(fig, administered_by_result['fully'], administered_complete_by_result['fully'],
+     predicted_administrations_by_result['fully'], predicted_administrations_pessimistic_by_result['fully'],
+     'Fully vaccinated', relative = True, 
+     extra_hovertemplate = lambda x: f'Manufacturer: {x}' if x != 'Total' else 'Any manufacturer')
+fig.update_layout(xaxis_title = "Date", yaxis_title = "Percentage fully vaccinated of complete population")
 show_or_save_plot(fig, 'completely', args.output_dir, args.suffix)
