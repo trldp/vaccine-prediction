@@ -377,9 +377,11 @@ expected_deliveries_pessimistic = expected_deliveries_pessimistic.set_index(['ma
 predicted_administrations = pd.DataFrame(columns = administered.columns)
 predicted_administrations_pessimistic = pd.DataFrame(columns = administered.columns)
 for manufacturer, details in manufacturers.iterrows():
-    predicted = predict(administered[manufacturer], deliveries.loc[manufacturer], expected_deliveries.loc[manufacturer], prediction_end_date, 
+    predicted = predict(administered[manufacturer], deliveries.loc[manufacturer], 
+                        expected_deliveries.loc[manufacturer] if manufacturer in expected_deliveries else pd.Series(), prediction_end_date, 
                         details['time_between_doses'], details['second_dose_reserved'])
-    predicted_pessimistic = predict(administered[manufacturer], deliveries.loc[manufacturer], expected_deliveries_pessimistic.loc[manufacturer], 
+    predicted_pessimistic = predict(administered[manufacturer], deliveries.loc[manufacturer], 
+                                    expected_deliveries_pessimistic.loc[manufacturer] if manufacturer in expected_deliveries_pessimistic else pd.Series(), 
                                     prediction_end_date, details['time_between_doses'], details['second_dose_reserved'])
     
     if isinstance(predicted, pd.Series):
