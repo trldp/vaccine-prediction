@@ -35,15 +35,19 @@ population = 11492641
 manufacturers = [
         {'manufacturer': 'Moderna',
          'second_dose_reserved': True,
+         'age_limit': False,
          'time_between_doses': timedelta(weeks = 4)},
         {'manufacturer': 'Johnson&Johnson',
          'second_dose_reserved': False,
+         'age_limit': True,
          'time_between_doses': None},
         {'manufacturer': 'Pfizer/BioNTech',
          'second_dose_reserved': False,
+         'age_limit': False,
          'time_between_doses': timedelta(weeks = 5)},
         {'manufacturer': 'AstraZeneca/Oxford',
          'second_dose_reserved': False,
+         'age_limit': True,
          'time_between_doses': timedelta(weeks = 12)}
     ]
 manufacturers = pd.DataFrame.from_records(manufacturers, index='manufacturer')
@@ -181,7 +185,7 @@ def predict(administered, delivered, expected_deliveries, prediction_end_date, t
     predicted_total_administrations = predicted_total_administrations[predicted_total_administrations.index < prediction_end_date]
     if pd.isna(time_between_doses):
         #Just one dose
-        return predicted_total_administrations
+        return pd.DataFrame(data = predicted_total_administrations, index = predicted_total_administrations.index, columns = ['dose'])
     
     #Predict first and second dose administrations
     first_doses_without_second_dose = (administered['first_dose'].cumsum() - administered['second_dose'].sum()).clip(lower = 0).diff()
@@ -403,14 +407,13 @@ for manufacturer, details in manufacturers.iterrows():
     predicted_pessimistic = predict(administered[manufacturer], deliveries.loc[manufacturer], 
                                     expected_deliveries_pessimistic.loc[manufacturer] if manufacturer in expected_deliveries_pessimistic else pd.Series(), 
                                     prediction_end_date, details['time_between_doses'], details['second_dose_reserved'])
+    #TODO: the handling of this age limit is not perfect
+    if details['age_limit']:
+        predicted_pessimistic[[col for col in ['dose', 'first_dose'] if col in predicted_pessimistic.columns]] = 0
     
-    if isinstance(predicted, pd.Series):
-        predicted_administrations[(manufacturer, 'dose')] = predicted
-        predicted_administrations_pessimistic[(manufacturer, 'dose')] = predicted_pessimistic
-    else:
-        for t in predicted.columns:
-            predicted_administrations[(manufacturer, t)] = predicted[t]
-            predicted_administrations_pessimistic[(manufacturer, t)] = predicted_pessimistic[t]
+    for t in predicted.columns:
+        predicted_administrations[(manufacturer, t)] = predicted[t]
+        predicted_administrations_pessimistic[(manufacturer, t)] = predicted_pessimistic[t]
 predicted_administrations = predicted_administrations.fillna(0.0)
 predicted_administrations_pessimistic = predicted_administrations_pessimistic.fillna(0.0)
 
@@ -427,7 +430,7 @@ plot(fig, administered_by_result.rename(mapper, axis = 'columns').sum(axis = 'co
      predicted_administrations_pessimistic_by_result.rename(mapper, axis = 'columns').sum(axis = 'columns', level=0), 
      '%{fullData.name}', relative = True, add_total = False)
 fig.update_layout(xaxis_title = "Date", yaxis_title = "Percentage vaccinated")
-show_or_save_plot(fig, 'administered_by_result', args.output_dir, args.suffix)
+show_or_save_plot(fig, 'administered-by-result', args.output_dir, args.suffix)
 
 fig = go.Figure()
 plot(fig, administered.sum(axis = 'columns', level = 0), administered_complete.sum(axis = 'columns', level = 0), 
