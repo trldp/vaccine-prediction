@@ -36,19 +36,23 @@ manufacturers = [
         {'manufacturer': 'Moderna',
          'second_dose_reserved': True,
          'age_limit': False,
-         'time_between_doses': timedelta(weeks = 4)},
+         'time_between_doses': timedelta(weeks = 4),
+         'extra_doses_factor': 11.5 / 10},
         {'manufacturer': 'Johnson&Johnson',
          'second_dose_reserved': False,
          'age_limit': True,
-         'time_between_doses': None},
+         'time_between_doses': None,
+         'extra_doses_factor': 1},
         {'manufacturer': 'Pfizer/BioNTech',
          'second_dose_reserved': False,
          'age_limit': False,
-         'time_between_doses': timedelta(weeks = 5)},
+         'time_between_doses': timedelta(weeks = 5),
+         'extra_doses_factor': 6.8 / 6},
         {'manufacturer': 'AstraZeneca/Oxford',
          'second_dose_reserved': False,
          'age_limit': True,
-         'time_between_doses': timedelta(weeks = 12)}
+         'time_between_doses': timedelta(weeks = 12),
+         'extra_doses_factor': 11.5 / 10}
     ]
 manufacturers = pd.DataFrame.from_records(manufacturers, index='manufacturer')
 
@@ -129,7 +133,8 @@ def get_predicted_administrations_for_delivery(delivery, pass_through_time, pred
     
     return predicted_administrations_for_delivery
 
-def predict(administered, delivered, expected_deliveries, prediction_end_date, time_between_doses = None, second_dose_reserved = False):
+def predict(administered, delivered, expected_deliveries, prediction_end_date, time_between_doses = None, second_dose_reserved = False,
+            extra_doses_factor = 1):
     """Calculate the predicted administrations for the given vaccine type. If the vaccine only has one dose, the parameter administered
     should have only one column. If the vaccine has two doses, the parameter administered should be a pd.DataFrame
     columns 'first_dose' and 'second_dose' containing the administered first and second doses of the vaccine, respectively.
@@ -143,7 +148,6 @@ def predict(administered, delivered, expected_deliveries, prediction_end_date, t
     prediction_date = administered.index.max() + timedelta(days = 1)
     
     #Correct for when more doses can be administered from a vial than originally expected
-    extra_doses_factor = get_extra_doses_factor(administered, delivered, second_dose_reserved)
     delivered = delivered * extra_doses_factor
     expected_deliveries = expected_deliveries * extra_doses_factor
     delivered = delivered.apply(math.ceil)
@@ -331,7 +335,7 @@ def plot(fig, administered, administered_complete, predicted_administrations, pr
                 details = '%{customdata:,} (%{y:.2%})'
             else:
                 details = '%{y:,}'
-            fig.add_trace(go.Scatter(x = col.index, y = y, name = name, legendgroup = name,
+            fig.add_trace(go.Scatter(x = col.index, y = y, name = name, legendgroup = name, customdata = col,
                                      showlegend = False, mode = 'lines', meta = [extra_hovertemplate(name)] if extra_hovertemplate else [],
                                      line = go.scatter.Line(color = colors[name], dash = 'dash'),
                                      hovertemplate = '<b>Date: %{x}</b><br />' + 
@@ -403,10 +407,11 @@ predicted_administrations_pessimistic = pd.DataFrame(columns = administered.colu
 for manufacturer, details in manufacturers.iterrows():
     predicted = predict(administered[manufacturer], deliveries.loc[manufacturer], 
                         expected_deliveries.loc[manufacturer] if manufacturer in expected_deliveries else pd.Series(), prediction_end_date, 
-                        details['time_between_doses'], details['second_dose_reserved'])
+                        details['time_between_doses'], details['second_dose_reserved'], details['extra_doses_factor'])
     predicted_pessimistic = predict(administered[manufacturer], deliveries.loc[manufacturer], 
                                     expected_deliveries_pessimistic.loc[manufacturer] if manufacturer in expected_deliveries_pessimistic else pd.Series(), 
-                                    prediction_end_date, details['time_between_doses'], details['second_dose_reserved'])
+                                    prediction_end_date, details['time_between_doses'], details['second_dose_reserved'],
+                                    details['extra_doses_factor'])
     #TODO: the handling of this age limit is not perfect
     if details['age_limit']:
         predicted_pessimistic[[col for col in ['dose', 'first_dose'] if col in predicted_pessimistic.columns]] = 0
