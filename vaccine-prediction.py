@@ -41,6 +41,7 @@ manufacturers = [
         {'manufacturer': 'Johnson&Johnson',
          'second_dose_reserved': False,
          'age_limit': True,
+         'volontary': True,
          'time_between_doses': None,
          'extra_doses_factor': 1},
         {'manufacturer': 'Pfizer/BioNTech',
@@ -51,6 +52,7 @@ manufacturers = [
         {'manufacturer': 'AstraZeneca/Oxford',
          'second_dose_reserved': False,
          'age_limit': True,
+         'volontary': False,
          'time_between_doses': timedelta(weeks = 12),
          'extra_doses_factor': 11.5 / 10}
     ]
@@ -388,7 +390,7 @@ if args.prediction_date is None:
 else:
     prediction_date = args.prediction_date
 prediction_date = datetime.combine(prediction_date, time())
-prediction_end_date = datetime(year = 2021, month = 7, day = 5)
+prediction_end_date = datetime(year = 2021, month = 8, day = 1)
 administered_complete = administered.copy()
 administered = administered[administered.index < prediction_date]
 
@@ -415,6 +417,8 @@ for manufacturer, details in manufacturers.iterrows():
     #TODO: the handling of this age limit is not perfect
     if details['age_limit']:
         predicted_pessimistic[[col for col in ['dose', 'first_dose'] if col in predicted_pessimistic.columns]] = 0
+        if not details['volontary']:
+            predicted.loc[predicted.index > datetime(year = 2021, month = 6, day = 20), [col for col in ['dose', 'first_dose'] if col in predicted_pessimistic.columns]] = 0
     
     for t in predicted.columns:
         predicted_administrations[(manufacturer, t)] = predicted[t]
