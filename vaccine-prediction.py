@@ -180,15 +180,16 @@ def predict(administered, delivered, expected_deliveries, prediction_end_date, t
     for d, delivery in to_administer.iterrows():
         predicted = get_predicted_administrations_for_delivery(delivery, pass_through_time, prediction_date)
         if predicted_total_administrations.empty:
-            date_range = inclusive_date_range(predicted.index.min(), predicted.index.max(), timedelta(days = 1))
+            r = inclusive_date_range(predicted.index.min(), predicted.index.max(), timedelta(days = 1))
         else:
-            date_range = inclusive_date_range(min(predicted_total_administrations.index.min(), predicted.index.min()),
+            r = inclusive_date_range(min(predicted_total_administrations.index.min(), predicted.index.min()),
                                               max(predicted_total_administrations.index.max(), predicted.index.max()),
                                               timedelta(days = 1))
-        predicted_total_administrations = predicted_total_administrations.reindex(date_range)
+        predicted_total_administrations = predicted_total_administrations.reindex(r)
         predicted_total_administrations[d] = predicted
     predicted_total_administrations = predicted_total_administrations.fillna(0.0).sum(axis = 'columns')
     predicted_total_administrations = predicted_total_administrations[predicted_total_administrations.index < prediction_end_date]
+    predicted_total_administrations = predicted_total_administrations.reindex(date_range(prediction_date, prediction_end_date, timedelta(days = 1))).fillna(0.0)
     if pd.isna(time_between_doses):
         #Just one dose
         return pd.DataFrame(data = predicted_total_administrations, index = predicted_total_administrations.index, columns = ['dose'])
