@@ -53,7 +53,8 @@ manufacturers = [
          'second_dose_reserved': False,
          'age_limit': True,
          'volontary': False,
-         'time_between_doses': timedelta(weeks = 12),
+         'time_between_doses': [(datetime(year = 2020, month = 1, day = 1), timedelta(weeks = 12)), 
+                                (datetime(year = 2021, month = 6, day = 1), timedelta(weeks = 8))],
          'extra_doses_factor': 11.5 / 10}
     ]
 manufacturers = pd.DataFrame.from_records(manufacturers, index='manufacturer')
@@ -190,7 +191,7 @@ def predict(administered, delivered, expected_deliveries, prediction_end_date, t
     predicted_total_administrations = predicted_total_administrations.fillna(0.0).sum(axis = 'columns')
     predicted_total_administrations = predicted_total_administrations[predicted_total_administrations.index < prediction_end_date]
     predicted_total_administrations = predicted_total_administrations.reindex(date_range(prediction_date, prediction_end_date, timedelta(days = 1))).fillna(0.0)
-    if pd.isna(time_between_doses):
+    if not isinstance(time_between_doses, list) and pd.isna(time_between_doses):
         #Just one dose
         return pd.DataFrame(data = predicted_total_administrations, index = predicted_total_administrations.index, columns = ['dose'])
     
@@ -210,10 +211,14 @@ def predict(administered, delivered, expected_deliveries, prediction_end_date, t
         return predicted_administrations
     else:
         for d in predicted_total_administrations.index:
-            first_dose_date = d - time_between_doses
-            second_doses = first_doses_without_second_dose.loc[first_doses_without_second_dose.index <= first_dose_date].sum()
+            if isinstance(time_between_doses, list):
+                first_dose_dates = [d - delta for (t, delta) in time_between_doses if t + delta < d]
+            else:
+                first_dose_dates = [d - time_between_doses]
+            dates_for_which_to_administer_second_dose = (first_doses_without_second_dose.index < min(first_dose_dates)) | (first_doses_without_second_dose.index.isin(first_dose_dates))
+            second_doses = first_doses_without_second_dose.loc[dates_for_which_to_administer_second_dose].sum()
             predicted_administrations.loc[d, 'second_dose'] += second_doses
-            first_doses_without_second_dose.loc[first_doses_without_second_dose.index <= first_dose_date] = 0.0
+            first_doses_without_second_dose.loc[dates_for_which_to_administer_second_dose] = 0.0
             
             doses_left = predicted_total_administrations.loc[d] - predicted_administrations.loc[d, 'second_dose']
             predicted_administrations.loc[d, 'first_dose'] += doses_left
@@ -221,7 +226,7 @@ def predict(administered, delivered, expected_deliveries, prediction_end_date, t
             
             #If the predicted second doses are higher than the predicted doses, we have to borrow the predicted first doses from earlier days
             earlier_date = d - timedelta(days = 1)
-            while earlier_date > first_dose_date and earlier_date >= prediction_date and predicted_administrations.loc[d, 'first_dose'] < 0:
+            while earlier_date > max(first_dose_dates) and earlier_date >= prediction_date and predicted_administrations.loc[d, 'first_dose'] < 0:
                 borrowed_doses = min(predicted_administrations.loc[earlier_date, 'first_dose'], -predicted_administrations.loc[d, 'first_dose'])
                 predicted_administrations.loc[earlier_date, 'first_dose'] -= borrowed_doses
                 first_doses_without_second_dose.loc[earlier_date] -= borrowed_doses
@@ -234,7 +239,7 @@ def predict(administered, delivered, expected_deliveries, prediction_end_date, t
             #keep them in first_doses_without_second_dose
             if predicted_administrations.loc[d, 'first_dose'] < 0:
                 predicted_administrations.loc[d, 'second_dose'] -= -predicted_administrations.loc[d, 'first_dose']
-                first_doses_without_second_dose.loc[first_dose_date] += -predicted_administrations.loc[d, 'first_dose']
+                first_doses_without_second_dose.loc[min(first_dose_dates)] += -predicted_administrations.loc[d, 'first_dose']
                 predicted_administrations.loc[d, 'first_dose'] = 0.0
                 first_doses_without_second_dose.loc[d] = 0.0
     return predicted_administrations
