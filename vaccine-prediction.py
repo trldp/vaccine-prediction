@@ -54,7 +54,7 @@ manufacturers = [
          'age_limit': True,
          'volontary': False,
          'time_between_doses': [(datetime(year = 2020, month = 1, day = 1), timedelta(weeks = 12)), 
-                                (datetime(year = 2021, month = 6, day = 1), timedelta(weeks = 8))],
+                                (datetime(year = 2021, month = 5, day = 24), timedelta(weeks = 8))],
          'extra_doses_factor': 11.5 / 10}
     ]
 manufacturers = pd.DataFrame.from_records(manufacturers, index='manufacturer')
