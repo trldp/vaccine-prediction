@@ -82,10 +82,11 @@ date,amount,manufacturer
 2021-06-09,100800,AstraZeneca/Oxford
 2021-06-10,36000,Johnson&Johnson
 2021-06-14,656370,Pfizer/BioNTech
-2021-06-15,76800,Moderna
-2021-06-17,124800,AstraZeneca/Oxford
+2021-06-16,76800,Moderna
 2021-06-17,36000,Johnson&Johnson
-2021-06-18,81600,Moderna
+2021-06-21,124800,AstraZeneca/Oxford
+2021-06-21,81600,Moderna
 2021-06-21,810810,Pfizer/BioNTech
 2021-06-24,24000,Johnson&Johnson
 2021-06-25,85200,Moderna
+2021-06-28,809640,Pfizer/BioNTech
