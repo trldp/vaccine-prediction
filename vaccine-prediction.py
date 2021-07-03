@@ -37,25 +37,29 @@ manufacturers = [
          'second_dose_reserved': True,
          'age_limit': False,
          'time_between_doses': timedelta(weeks = 4),
-         'extra_doses_factor': 11.5 / 10},
+         'extra_doses_factor': 11.5 / 10,
+         'time_to_high_protection': timedelta(weeks = 2)},
         {'manufacturer': 'Johnson&Johnson',
          'second_dose_reserved': False,
          'age_limit': True,
          'volontary': True,
          'time_between_doses': None,
-         'extra_doses_factor': 1},
+         'extra_doses_factor': 1,
+         'time_to_high_protection': timedelta(weeks = 4)},
         {'manufacturer': 'Pfizer/BioNTech',
          'second_dose_reserved': False,
          'age_limit': False,
          'time_between_doses': timedelta(weeks = 5),
-         'extra_doses_factor': 6.8 / 6},
+         'extra_doses_factor': 6.8 / 6,
+         'time_to_high_protection': timedelta(weeks = 2)},
         {'manufacturer': 'AstraZeneca/Oxford',
          'second_dose_reserved': False,
          'age_limit': True,
          'volontary': False,
          'time_between_doses': [(datetime(year = 2020, month = 1, day = 1), timedelta(weeks = 12)), 
                                 (datetime(year = 2021, month = 5, day = 24), timedelta(weeks = 8))],
-         'extra_doses_factor': 11.5 / 10}
+         'extra_doses_factor': 11.5 / 10,
+         'time_to_high_protection': timedelta(weeks = 2)}
     ]
 manufacturers = pd.DataFrame.from_records(manufacturers, index='manufacturer')
 
@@ -260,14 +264,33 @@ def transform_by_type_to_by_result(df):
     result = result.sort_index(axis = 'columns')
     return result.drop('dose', axis = 'columns')
 
+def get_high_protection(fully_vaccinated, times_to_high_protection):
+    """Get the number of people with high protection from a DataFrame containing the fully vaccinated people."""
+    result = pd.DataFrame()
+    for manufacturer in fully_vaccinated.columns:
+        if manufacturer not in times_to_high_protection:
+            continue
+        
+        high_protection = fully_vaccinated[manufacturer].copy()
+        high_protection.index += times_to_high_protection[manufacturer]
+        union = result.index.union(high_protection.index)
+        result = result.reindex(inclusive_date_range(union.min(), union.max(), timedelta(days = 1)))
+        result[manufacturer] = high_protection
+    
+    return result.fillna(0.0)
+
 def plot(fig, administered, administered_complete, predicted_administrations, predicted_administrations_pessimistic, label, relative = False,
-         add_total = True, extra_hovertemplate = None):
+         add_total = True, extra_hovertemplate = None, color_start = 0):
+    complete_further_than_other = administered_complete.index.max() > administered.index.max()
+    
     administered = administered.copy()
+    extra_administered = administered[administered.index >= predicted_administrations.index.min()]
+    administered = administered[administered.index < predicted_administrations.index.min()]
     administered = administered.cumsum()
     if add_total:
         administered['Total'] = administered.sum(axis = 'columns')
     administered.sort_index(axis = 'columns', inplace = True)
-    colors = {col: plotly.colors.qualitative.D3[i] for i, col in enumerate(administered.columns)}
+    colors = {col: plotly.colors.qualitative.D3[i + color_start] for i, col in enumerate(administered.columns)}
     for name, col in administered.items():
         y = col.copy()
         if relative:
@@ -287,12 +310,14 @@ def plot(fig, administered, administered_complete, predicted_administrations, pr
     if add_total:
         predicted_administrations['Total'] = predicted_administrations.sum(axis = 'columns')
     predicted_administrations.loc[administered.index.max()] = administered.iloc[-1]
+    predicted_administrations.loc[extra_administered.index] += extra_administered
     predicted_administrations.sort_index(inplace = True)
     predicted_administrations = predicted_administrations.cumsum()
     predicted_administrations_pessimistic = predicted_administrations_pessimistic.copy()
     if add_total:
         predicted_administrations_pessimistic['Total'] = predicted_administrations_pessimistic.sum(axis = 'columns')
     predicted_administrations_pessimistic.loc[administered.index.max()] = administered.iloc[-1]
+    predicted_administrations_pessimistic.loc[extra_administered.index] += extra_administered
     predicted_administrations_pessimistic.sort_index(inplace = True)
     predicted_administrations_pessimistic = predicted_administrations_pessimistic.cumsum()
     for name in predicted_administrations.columns:
@@ -336,7 +361,7 @@ def plot(fig, administered, administered_complete, predicted_administrations, pr
                                                      ('<br />%{meta[0]}' if extra_hovertemplate else '') + 
                                                      '<extra></extra>'))
     
-    if administered_complete.index.max() > administered.index.max():
+    if complete_further_than_other:
         administered_complete = administered_complete.copy()
         if add_total:
             administered_complete['Total'] = administered_complete.sum(axis = 'columns')
@@ -452,7 +477,22 @@ plot(fig, administered_by_result.rename(mapper, axis = 'columns').sum(axis = 'co
      predicted_administrations_by_result.rename(mapper, axis = 'columns').sum(axis = 'columns', level=0), 
      predicted_administrations_pessimistic_by_result.rename(mapper, axis = 'columns').sum(axis = 'columns', level=0), 
      '%{fullData.name}', relative = True, add_total = False)
-fig.update_layout(xaxis_title = "Date", yaxis_title = "Percentage vaccinated")
+highly_protected = get_high_protection(administered_by_result['fully'], manufacturers['time_to_high_protection']).sum(axis = 'columns')
+highly_protected = highly_protected[highly_protected.index < prediction_end_date]
+highly_protected_complete = get_high_protection(administered_complete_by_result['fully'], 
+                                               manufacturers['time_to_high_protection']).sum(axis = 'columns')
+highly_protected_complete = highly_protected_complete[highly_protected_complete.index < prediction_end_date]
+predicted_highly_protected = get_high_protection(predicted_administrations_by_result['fully'], 
+                                                manufacturers['time_to_high_protection']).sum(axis = 'columns')
+predicted_highly_protected = predicted_highly_protected[predicted_highly_protected.index < prediction_end_date]
+predicted_highly_protected_pessimistic = get_high_protection(predicted_administrations_pessimistic_by_result['fully'], 
+                                                            manufacturers['time_to_high_protection']).sum(axis = 'columns')
+predicted_highly_protected_pessimistic = predicted_highly_protected_pessimistic[predicted_highly_protected_pessimistic.index < prediction_end_date]
+plot(fig, pd.DataFrame(highly_protected, columns = ['High protection']), pd.DataFrame(highly_protected_complete, columns = ['High protection']),
+     pd.DataFrame(predicted_highly_protected, columns = ['High protection']), 
+     pd.DataFrame(predicted_highly_protected_pessimistic, columns = ['High protection']), relative = True, add_total = False, 
+     label = '%{fullData.name}', color_start = 2)
+fig.update_layout(xaxis_title = "Date", yaxis_title = "Percentage of full population")
 show_or_save_plot(fig, 'administered-by-result', args.output_dir, args.suffix)
 
 fig = go.Figure()
