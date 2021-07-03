@@ -59,6 +59,12 @@ manufacturers = [
     ]
 manufacturers = pd.DataFrame.from_records(manufacturers, index='manufacturer')
 
+#The 2nd vaccination of AstraZeneca done earlier since july 1st, hence put a time between doses of 8 weeks in the optimistic scenario
+#from may 6th onwards (i.e. 8 weeks before 1st of july)
+manufacturers_pessimistic = manufacturers.copy()
+manufacturers.at['AstraZeneca/Oxford', 'time_between_doses'] = [(datetime(year = 2020, month = 1, day = 1), timedelta(weeks = 12)), 
+                                                                 (datetime(year = 2021, month = 5, day = 6), timedelta(weeks = 8))]
+
 def date_range(start, end, interval):
     result = []
     cur = start
@@ -412,18 +418,20 @@ expected_deliveries_pessimistic = expected_deliveries_pessimistic.set_index(['ma
 
 predicted_administrations = pd.DataFrame(columns = administered.columns)
 predicted_administrations_pessimistic = pd.DataFrame(columns = administered.columns)
-for manufacturer, details in manufacturers.iterrows():
+for manufacturer in manufacturers.index:
     predicted = predict(administered[manufacturer], deliveries.loc[manufacturer], 
                         expected_deliveries.loc[manufacturer] if manufacturer in expected_deliveries else pd.Series(), prediction_end_date, 
-                        details['time_between_doses'], details['second_dose_reserved'], details['extra_doses_factor'])
+                        manufacturers.loc[manufacturer, 'time_between_doses'], manufacturers.loc[manufacturer, 'second_dose_reserved'], 
+                        manufacturers.loc[manufacturer, 'extra_doses_factor'])
     predicted_pessimistic = predict(administered[manufacturer], deliveries.loc[manufacturer], 
                                     expected_deliveries_pessimistic.loc[manufacturer] if manufacturer in expected_deliveries_pessimistic else pd.Series(), 
-                                    prediction_end_date, details['time_between_doses'], details['second_dose_reserved'],
-                                    details['extra_doses_factor'])
+                                    prediction_end_date, manufacturers_pessimistic.loc[manufacturer, 'time_between_doses'], 
+                                    manufacturers_pessimistic.loc[manufacturer, 'second_dose_reserved'],
+                                    manufacturers_pessimistic.loc[manufacturer, 'extra_doses_factor'])
     #TODO: the handling of this age limit is not perfect
-    if details['age_limit']:
+    if manufacturers_pessimistic.loc[manufacturer, 'age_limit']:
         predicted_pessimistic[[col for col in ['dose', 'first_dose'] if col in predicted_pessimistic.columns]] = 0
-        if not details['volontary']:
+        if not manufacturers_pessimistic.loc[manufacturer, 'volontary']:
             predicted.loc[predicted.index > datetime(year = 2021, month = 6, day = 20), [col for col in ['dose', 'first_dose'] if col in predicted_pessimistic.columns]] = 0
     
     for t in predicted.columns:
