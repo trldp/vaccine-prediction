@@ -279,13 +279,15 @@ def get_high_protection(fully_vaccinated, times_to_high_protection):
     
     return result.fillna(0.0)
 
-def plot(fig, administered, administered_complete, predicted_administrations, predicted_administrations_pessimistic, label, relative = False,
+def plot(fig, administered, administered_complete, predicted_administrations = None, predicted_administrations_pessimistic = None, 
+         label = 'amount', relative = False,
          add_total = True, extra_hovertemplate = None, color_start = 0):
     complete_further_than_other = administered_complete.index.max() > administered.index.max()
     
     administered = administered.copy()
-    extra_administered = administered[administered.index >= predicted_administrations.index.min()]
-    administered = administered[administered.index < predicted_administrations.index.min()]
+    if predicted_administrations is not None:
+        extra_administered = administered[administered.index >= predicted_administrations.index.min()]
+        administered = administered[administered.index < predicted_administrations.index.min()]
     administered = administered.cumsum()
     if add_total:
         administered['Total'] = administered.sum(axis = 'columns')
@@ -306,60 +308,61 @@ def plot(fig, administered, administered_complete, predicted_administrations, pr
                                              ('<br />%{meta[0]}' if extra_hovertemplate else '') + 
                                              '<extra></extra>'))
     
-    predicted_administrations = predicted_administrations.copy()
-    if add_total:
-        predicted_administrations['Total'] = predicted_administrations.sum(axis = 'columns')
-    predicted_administrations.loc[administered.index.max()] = administered.iloc[-1]
-    predicted_administrations.loc[extra_administered.index] += extra_administered
-    predicted_administrations.sort_index(inplace = True)
-    predicted_administrations = predicted_administrations.cumsum()
-    predicted_administrations_pessimistic = predicted_administrations_pessimistic.copy()
-    if add_total:
-        predicted_administrations_pessimistic['Total'] = predicted_administrations_pessimistic.sum(axis = 'columns')
-    predicted_administrations_pessimistic.loc[administered.index.max()] = administered.iloc[-1]
-    predicted_administrations_pessimistic.loc[extra_administered.index] += extra_administered
-    predicted_administrations_pessimistic.sort_index(inplace = True)
-    predicted_administrations_pessimistic = predicted_administrations_pessimistic.cumsum()
-    for name in predicted_administrations.columns:
-        y_min = predicted_administrations_pessimistic[name].copy()
-        y_max = predicted_administrations[name].copy()
-        diff = (y_min != y_max).any()
-        if relative:
-            y_min /= population
-            y_max /= population
-            if diff:
-                custom_data = list(zip(predicted_administrations_pessimistic[name], predicted_administrations[name],
-                                       y_min, y_max))
-                details = 'between %{customdata[0]:,} (%{customdata[2]:.2%}) and %{customdata[1]:,} (%{customdata[3]:.2%})'
+    if predicted_administrations is not None:
+        predicted_administrations = predicted_administrations.copy()
+        if add_total:
+            predicted_administrations['Total'] = predicted_administrations.sum(axis = 'columns')
+        predicted_administrations.loc[administered.index.max()] = administered.iloc[-1]
+        predicted_administrations.loc[extra_administered.index] += extra_administered
+        predicted_administrations.sort_index(inplace = True)
+        predicted_administrations = predicted_administrations.cumsum()
+        predicted_administrations_pessimistic = predicted_administrations_pessimistic.copy()
+        if add_total:
+            predicted_administrations_pessimistic['Total'] = predicted_administrations_pessimistic.sum(axis = 'columns')
+        predicted_administrations_pessimistic.loc[administered.index.max()] = administered.iloc[-1]
+        predicted_administrations_pessimistic.loc[extra_administered.index] += extra_administered
+        predicted_administrations_pessimistic.sort_index(inplace = True)
+        predicted_administrations_pessimistic = predicted_administrations_pessimistic.cumsum()
+        for name in predicted_administrations.columns:
+            y_min = predicted_administrations_pessimistic[name].copy()
+            y_max = predicted_administrations[name].copy()
+            diff = (y_min != y_max).any()
+            if relative:
+                y_min /= population
+                y_max /= population
+                if diff:
+                    custom_data = list(zip(predicted_administrations_pessimistic[name], predicted_administrations[name],
+                                           y_min, y_max))
+                    details = 'between %{customdata[0]:,} (%{customdata[2]:.2%}) and %{customdata[1]:,} (%{customdata[3]:.2%})'
+                else:
+                    custom_data = list(zip(predicted_administrations[name], y_max))
+                    details = '%{customdata[0]:,} (%{customdata[1]:.2%})'
             else:
-                custom_data = list(zip(predicted_administrations[name], y_max))
-                details = '%{customdata[0]:,} (%{customdata[1]:.2%})'
-        else:
-            if diff:
-                custom_data = list(zip(y_min, y_max))
-                details = 'between %{customdata[0]:,} and %{customdata[1]:,}'
-            else:
-                custom_data = None
-                details = '%{y:,}'
-        fig.add_trace(go.Scatter(x = predicted_administrations[name].index, y = y_max,
-                                 customdata = custom_data,
-                                 name = name, legendgroup = name,
-                                 showlegend = False, mode = 'lines', meta = [extra_hovertemplate(name)] if extra_hovertemplate else [],
-                                 line = go.scatter.Line(color = colors[name], dash = 'dot'),
-                                 hovertemplate = '<b>Date: %{x}</b><br />' +
-                                                 label + ' (prediction): ' + details + 
-                                                 ('<br />%{meta[0]}' if extra_hovertemplate else '') + 
-                                                 '<extra></extra>'))
-        if diff:
-            fig.add_trace(go.Scatter(x = predicted_administrations[name].index, y = y_min,
+                if diff:
+                    custom_data = list(zip(y_min, y_max))
+                    details = 'between %{customdata[0]:,} and %{customdata[1]:,}'
+                else:
+                    custom_data = None
+                    details = '%{y:,}'
+            fig.add_trace(go.Scatter(x = predicted_administrations[name].index, y = y_max,
                                      customdata = custom_data,
-                                     name = name, legendgroup = name, meta = [extra_hovertemplate(name)] if extra_hovertemplate else [],
-                                     showlegend = False, mode = 'lines', fill = 'tonexty',
+                                     name = name, legendgroup = name,
+                                     showlegend = False, mode = 'lines', meta = [extra_hovertemplate(name)] if extra_hovertemplate else [],
                                      line = go.scatter.Line(color = colors[name], dash = 'dot'),
                                      hovertemplate = '<b>Date: %{x}</b><br />' +
                                                      label + ' (prediction): ' + details + 
                                                      ('<br />%{meta[0]}' if extra_hovertemplate else '') + 
                                                      '<extra></extra>'))
+            if diff:
+                fig.add_trace(go.Scatter(x = predicted_administrations[name].index, y = y_min,
+                                         customdata = custom_data,
+                                         name = name, legendgroup = name, meta = [extra_hovertemplate(name)] if extra_hovertemplate else [],
+                                         showlegend = False, mode = 'lines', fill = 'tonexty',
+                                         line = go.scatter.Line(color = colors[name], dash = 'dot'),
+                                         hovertemplate = '<b>Date: %{x}</b><br />' +
+                                                         label + ' (prediction): ' + details + 
+                                                         ('<br />%{meta[0]}' if extra_hovertemplate else '') + 
+                                                         '<extra></extra>'))
     
     if complete_further_than_other:
         administered_complete = administered_complete.copy()
@@ -472,22 +475,23 @@ predicted_administrations_pessimistic_by_result = transform_by_type_to_by_result
 
 fig = go.Figure()
 mapper = {'partially': 'At least partially vaccinated', 'fully': 'Fully vaccinated'}
+#Hide prediction of partially vaccinated, since the model isn't accurate anymore
 plot(fig, administered_by_result.rename(mapper, axis = 'columns').sum(axis = 'columns', level=0), 
      administered_complete_by_result.rename(mapper, axis = 'columns').sum(axis = 'columns', level=0), 
-     predicted_administrations_by_result.rename(mapper, axis = 'columns').sum(axis = 'columns', level=0), 
-     predicted_administrations_pessimistic_by_result.rename(mapper, axis = 'columns').sum(axis = 'columns', level=0), 
-     '%{fullData.name}', relative = True, add_total = False)
+     predicted_administrations_by_result.rename(mapper, axis = 'columns').sum(axis = 'columns', level=0)[['Fully vaccinated']], 
+     predicted_administrations_pessimistic_by_result.rename(mapper, axis = 'columns').sum(axis = 'columns', level=0)[['Fully vaccinated']], 
+     label = '%{fullData.name}', relative = True, add_total = False)
 highly_protected = get_high_protection(administered_by_result['fully'], manufacturers['time_to_high_protection']).sum(axis = 'columns')
-highly_protected = highly_protected[highly_protected.index < prediction_end_date]
+highly_protected = highly_protected[highly_protected.index < prediction_end_date + manufacturers['time_to_high_protection'].min()]
 highly_protected_complete = get_high_protection(administered_complete_by_result['fully'], 
                                                manufacturers['time_to_high_protection']).sum(axis = 'columns')
-highly_protected_complete = highly_protected_complete[highly_protected_complete.index < prediction_end_date]
+highly_protected_complete = highly_protected_complete[highly_protected_complete.index < prediction_end_date + manufacturers['time_to_high_protection'].min()]
 predicted_highly_protected = get_high_protection(predicted_administrations_by_result['fully'], 
                                                 manufacturers['time_to_high_protection']).sum(axis = 'columns')
-predicted_highly_protected = predicted_highly_protected[predicted_highly_protected.index < prediction_end_date]
+predicted_highly_protected = predicted_highly_protected[predicted_highly_protected.index < prediction_end_date + manufacturers['time_to_high_protection'].min()]
 predicted_highly_protected_pessimistic = get_high_protection(predicted_administrations_pessimistic_by_result['fully'], 
                                                             manufacturers['time_to_high_protection']).sum(axis = 'columns')
-predicted_highly_protected_pessimistic = predicted_highly_protected_pessimistic[predicted_highly_protected_pessimistic.index < prediction_end_date]
+predicted_highly_protected_pessimistic = predicted_highly_protected_pessimistic[predicted_highly_protected_pessimistic.index < prediction_end_date + manufacturers['time_to_high_protection'].min()]
 plot(fig, pd.DataFrame(highly_protected, columns = ['High protection']), pd.DataFrame(highly_protected_complete, columns = ['High protection']),
      pd.DataFrame(predicted_highly_protected, columns = ['High protection']), 
      pd.DataFrame(predicted_highly_protected_pessimistic, columns = ['High protection']), relative = True, add_total = False, 
@@ -497,15 +501,13 @@ show_or_save_plot(fig, 'administered-by-result', args.output_dir, args.suffix)
 
 fig = go.Figure()
 plot(fig, administered.sum(axis = 'columns', level = 0), administered_complete.sum(axis = 'columns', level = 0), 
-     predicted_administrations.sum(axis = 'columns', level = 0), predicted_administrations_pessimistic.sum(axis='columns', level=0), 
-     'Administered', extra_hovertemplate = lambda x: f'Manufacturer: {x}' if x != 'Total' else 'Any manufacturer')
+     label = 'Administered', extra_hovertemplate = lambda x: f'Manufacturer: {x}' if x != 'Total' else 'Any manufacturer')
 fig.update_layout(xaxis_title = "Date", yaxis_title = "Nr of administered vaccines")
 show_or_save_plot(fig, 'administered', args.output_dir, args.suffix)
 
 fig = go.Figure()
 plot(fig, administered_by_result['partially'], administered_complete_by_result['partially'],
-     predicted_administrations_by_result['partially'], predicted_administrations_pessimistic_by_result['partially'],
-     'Partially vaccinated', relative = True, 
+     label = 'Partially vaccinated', relative = True, 
      extra_hovertemplate = lambda x: f'Manufacturer: {x}' if x != 'Total' else 'Any manufacturer')
 fig.update_layout(xaxis_title = "Date", yaxis_title = "Percentage at least partially vaccinated of complete population")
 show_or_save_plot(fig, 'partially', args.output_dir, args.suffix)
@@ -513,7 +515,7 @@ show_or_save_plot(fig, 'partially', args.output_dir, args.suffix)
 fig = go.Figure()
 plot(fig, administered_by_result['fully'], administered_complete_by_result['fully'],
      predicted_administrations_by_result['fully'], predicted_administrations_pessimistic_by_result['fully'],
-     'Fully vaccinated', relative = True, 
+     label = 'Fully vaccinated', relative = True, 
      extra_hovertemplate = lambda x: f'Manufacturer: {x}' if x != 'Total' else 'Any manufacturer')
 fig.update_layout(xaxis_title = "Date", yaxis_title = "Percentage fully vaccinated of complete population")
 show_or_save_plot(fig, 'completely', args.output_dir, args.suffix)
